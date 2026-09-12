@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock
 from ai_team.domain.states import State, TerminalStatus
-from ai_team.orchestration.state_machine import OrchestrationRun
+from ai_team._legacy.orchestration.state_machine import OrchestrationRun
 from ai_team.providers.mocks import (
     MockJuniorDev,
     MockManager,

@@ -1,147 +1,174 @@
-"""Developer node (Alex) drafting implementation and performing iterative repair based on QA feedback."""
+"""Developer node (Alex): implement main.py against the frozen test contract.
 
-import os
-from typing import Dict, Any
-from ai_team.graph.state import TriadCouncilState
-from ai_team.utils import extract_python_code, validate_python_syntax, repair_truncated_python_code
+Two rules shape this node:
+
+1. It may only produce `main.py`. The test suite is frozen upstream, and this
+   node's return value is filtered so it cannot touch it even by accident.
+2. There is no stub fallback. If every provider fails, the node reports that
+   honestly and lets QA fail the run, rather than shipping a Hello World that
+   makes the pipeline look successful.
+"""
+
+from typing import Any, Dict, Optional, Tuple
+
+from ai_team.config import get_config
 from ai_team.domain.contracts import AgentStatusEvent
+from ai_team.graph.contract_lock import assert_contract_unbroken, frozen_test_source
+from ai_team.graph.state import TriadCouncilState
 from ai_team.spatial.event_bus import get_event_bus
-import asyncio
+from ai_team.utils import (
+    extract_python_code,
+    repair_truncated_python_code,
+    validate_python_syntax,
+)
+
+_DRAFT_PROMPT = (
+    "You are Alex, a Senior Software Developer. Write a complete Python "
+    "implementation in `main.py` for:\n\n"
+    "Task: {task}\n\n"
+    "It must satisfy this frozen unit test suite exactly. You may not change "
+    "the tests.\n```python\n{tests}\n```\n\n"
+    "Requirements:\n"
+    "1. Define every class, function, and name the test suite imports.\n"
+    "2. Handle edge cases, invalid input, and concurrency where relevant.\n"
+    "3. The code must be syntactically complete and valid.\n"
+    "4. Return ONLY the Python code for `main.py` in a ```python block."
+)
+
+_REPAIR_PROMPT = (
+    "You are Alex, a Senior Software Developer. Maya (QA) rejected your "
+    "implementation for:\n\nTask: {task}\n\n"
+    "Your previous `main.py`:\n```python\n{previous}\n```\n\n"
+    "QA findings you must fix:\n{feedback}\n\n"
+    "The frozen test suite, which you may not change:\n```python\n{tests}\n```\n\n"
+    "Return the complete corrected `main.py` in a ```python block."
+)
+
+
+def _from_groq(prompt: str, config) -> Tuple[str, str]:
+    from langchain_groq import ChatGroq
+
+    llm = ChatGroq(
+        model_name=config.groq_model,
+        groq_api_key=config.groq_api_key,
+        temperature=0.2,
+        max_tokens=2500,
+        request_timeout=30,
+    )
+    return llm.invoke(prompt).content, f"groq:{config.groq_model}"
+
+
+def _from_gemini(prompt: str, config) -> Tuple[str, str]:
+    from google import genai
+
+    client = genai.Client(api_key=config.gemini_api_key)
+    response = client.models.generate_content(
+        model=config.gemini_researcher_model,
+        contents=prompt,
+    )
+    return response.text, f"gemini:{config.gemini_researcher_model}"
+
+
+def _from_openrouter(prompt: str, config) -> Tuple[str, str]:
+    from langchain_openai import ChatOpenAI
+
+    llm = ChatOpenAI(
+        model=config.openrouter_model,
+        base_url="https://openrouter.ai/api/v1",
+        api_key=config.openrouter_api_key,
+        temperature=0.2,
+        max_tokens=2500,
+        request_timeout=35,
+    )
+    return llm.invoke(prompt).content, f"openrouter:{config.openrouter_model}"
+
+
+def _announce(attempts: int) -> None:
+    status = (
+        "Writing implementation against the frozen contract..."
+        if attempts == 0
+        else f"Repairing implementation from QA findings (attempt {attempts})..."
+    )
+    try:
+        get_event_bus().dispatch(
+            AgentStatusEvent(agent_id="developer", status_text=status, animation="Type")
+        )
+    except Exception as err:  # never let choreography break the pipeline
+        print(f"  [Developer] status dispatch skipped: {err}")
 
 
 def developer_node(state: TriadCouncilState) -> Dict[str, Any]:
-    """
-    Alex (Developer) implements main.py to satisfy the TDD contract.
-    If returning from a failed QA audit, Alex reviews Maya's feedback and repairs the code.
-    """
+    """Draft or repair `main.py`. Never touches the test suite."""
+    assert_contract_unbroken(state, "the developer node")
+
+    config = get_config()
     task = state.get("task_prompt", "")
-    contract = state.get("tdd_contract") or {}
-    test_code = contract.get("test_main.py", "")
+    tests = frozen_test_source(state)
     attempts = state.get("repair_attempts", 0)
-    qa_feedback = state.get("qa_feedback", "")
-    existing_code = (state.get("synthesized_code") or {}).get("main.py", "")
+    previous = (state.get("synthesized_code") or {}).get("main.py", "")
 
-    # 1. Broadcast 3D status to office
-    bus = get_event_bus()
-    try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            status_desc = "Writing implementation code..." if attempts == 0 else f"Repairing code based on QA feedback (Attempt {attempts})..."
-            asyncio.create_task(
-                bus.broadcast(
-                    AgentStatusEvent(
-                        agent_id="developer",
-                        status_text=status_desc,
-                        animation="Type",
-                    )
-                )
-            )
-    except Exception:
-        pass
+    _announce(attempts)
 
-    groq_key = os.getenv("GROQ_API_KEY")
-    gemini_key = os.getenv("GEMINI_API_KEY")
-    openrouter_key = os.getenv("OPENROUTER_API_KEY")
-    dev_code = existing_code
-
-    # Build prompt
-    if attempts == 0 or not existing_code:
-        prompt = (
-            f"You are Alex, a Senior Software Developer. Write a complete, production-grade Python implementation in `main.py` for:\n\n"
-            f"Task: {task}\n\n"
-            f"Unit Test Suite Contract that your code MUST satisfy:\n```python\n{test_code}\n```\n\n"
-            "Requirements:\n"
-            "1. Must define all classes, functions, and variables imported or checked by the test suite.\n"
-            "2. Must handle concurrency, edge cases, and type safety.\n"
-            "3. The Python code must be 100% complete, fully closed, and syntactically valid.\n"
-            "4. Return ONLY valid executable Python code for `main.py` enclosed in ```python markdown fences."
-        )
+    if attempts == 0 or not previous:
+        prompt = _DRAFT_PROMPT.format(task=task, tests=tests)
     else:
-        prompt = (
-            f"You are Alex, a Senior Software Developer. Maya (QA Auditor) found issues with your previous code for:\n"
-            f"Task: {task}\n\n"
-            f"Previous implementation (main.py):\n```python\n{existing_code}\n```\n\n"
-            f"QA Audit Feedback / Failing Issues:\n{qa_feedback}\n\n"
-            f"Unit Test Suite Contract:\n```python\n{test_code}\n```\n\n"
-            "Fix the identified issues and output the complete, corrected Python code for `main.py` in ```python markdown fences."
+        prompt = _REPAIR_PROMPT.format(
+            task=task,
+            previous=previous,
+            feedback=state.get("qa_feedback", "(no feedback recorded)"),
+            tests=tests,
         )
 
-    # Provider 1: Groq (LPU Speed)
-    if groq_key:
+    providers = []
+    if config.groq_api_key:
+        providers.append(("Groq", _from_groq))
+    if config.gemini_api_key:
+        providers.append(("Gemini", _from_gemini))
+    if config.openrouter_api_key:
+        providers.append(("OpenRouter", _from_openrouter))
+
+    code: Optional[str] = None
+    attribution = "none"
+    notes = []
+
+    for label, call in providers:
         try:
-            print(f"  ... [Developer Alex / Groq] Drafting implementation (Attempt {attempts + 1})...")
-            from langchain_groq import ChatGroq
-            groq_model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip()
-            llm = ChatGroq(
-                model_name=groq_model,
-                groq_api_key=groq_key,
-                temperature=0.2,
-                max_tokens=2500,
-                request_timeout=30,
-            )
-            resp = llm.invoke(prompt)
-            clean = extract_python_code(resp.content)
-            clean = repair_truncated_python_code(clean)
-            is_valid, _ = validate_python_syntax(clean)
-            if is_valid and len(clean) > 20:
-                dev_code = clean
-            elif not is_valid:
-                print("  [Developer Warning] Groq output had syntax errors. Trying secondary provider...")
+            print(f"  ... [Developer Alex / {label}] Drafting implementation...")
+            raw, attribution_candidate = call(prompt, config)
         except Exception as err:
-            print(f"  [Developer Notice] Groq notice: {err}. Trying Gemini...")
+            notes.append(f"{label} unavailable: {err}")
+            continue
 
-    # Provider 2: Gemini Fallback
-    if (not dev_code or not validate_python_syntax(dev_code)[0]) and gemini_key:
-        try:
-            print("  ... [Developer Alex / Gemini] Drafting code via secondary provider...")
-            from google import genai
-            client = genai.Client(api_key=gemini_key)
-            resp = client.models.generate_content(
-                model=os.getenv("GEMINI_RESEARCHER_MODEL", "gemini-2.5-flash"),
-                contents=prompt,
-            )
-            clean = extract_python_code(resp.text)
-            clean = repair_truncated_python_code(clean)
-            is_valid, _ = validate_python_syntax(clean)
-            if is_valid:
-                dev_code = clean
-        except Exception as err:
-            print(f"  [Developer Notice] Gemini notice: {err}. Trying OpenRouter...")
+        candidate = repair_truncated_python_code(extract_python_code(raw or ""))
+        is_valid, syntax_error = validate_python_syntax(candidate)
+        if is_valid and candidate.strip():
+            code = candidate
+            attribution = attribution_candidate
+            break
 
-    # Provider 3: OpenRouter Fallback
-    if (not dev_code or not validate_python_syntax(dev_code)[0]) and openrouter_key:
-        try:
-            print("  ... [Developer Alex / OpenRouter] Drafting code via fallback...")
-            from langchain_openai import ChatOpenAI
-            llm_router = ChatOpenAI(
-                model=os.getenv("OPENROUTER_MODEL", "anthropic/claude-3.5-sonnet"),
-                base_url="https://openrouter.ai/api/v1",
-                api_key=openrouter_key,
-                temperature=0.2,
-                max_tokens=2500,
-                request_timeout=35,
-            )
-            resp = llm_router.invoke(prompt)
-            clean = extract_python_code(resp.content)
-            clean = repair_truncated_python_code(clean)
-            is_valid, _ = validate_python_syntax(clean)
-            if is_valid:
-                dev_code = clean
-        except Exception as err:
-            print(f"  [Developer Notice] OpenRouter notice: {err}")
+        notes.append(f"{label} produced invalid Python: {syntax_error}")
 
-    if not dev_code or not validate_python_syntax(dev_code)[0]:
-        dev_code = (
-            f"'''Implementation module for: {task}'''\n\n"
-            "def generate_html() -> str:\n"
-            "    return '<!DOCTYPE html><html><head><title>Hello World</title></head><body><h1>Hello world</h1></body></html>'\n\n"
-            "if __name__ == '__main__':\n"
-            "    print(generate_html())\n"
-        )
-
-    return {
-        "synthesized_code": {
-            "main.py": dev_code,
-            "test_main.py": test_code,
+    if code is None:
+        # Deliberately no Hello World stub: an empty implementation fails QA,
+        # which is the truthful outcome.
+        reason = "; ".join(notes) or "no provider credentials configured"
+        print(f"  [Developer Alex] No usable implementation produced: {reason}")
+        return {
+            "synthesized_code": {"main.py": "", "test_main.py": tests},
+            "provider_attribution": {
+                **(state.get("provider_attribution") or {}),
+                "main.py": "none",
+            },
+            "qa_feedback": f"Developer produced no valid implementation: {reason}",
         }
+
+    print(f"  [Developer Alex] Implementation drafted by {attribution}.")
+    return {
+        # test_main.py is copied verbatim from the frozen contract so the
+        # packaged bundle is complete, never regenerated.
+        "synthesized_code": {"main.py": code, "test_main.py": tests},
+        "provider_attribution": {
+            **(state.get("provider_attribution") or {}),
+            "main.py": attribution,
+        },
     }

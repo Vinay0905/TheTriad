@@ -1,5 +1,19 @@
 # AGENTS.md
 
+> [!IMPORTANT]
+> **Status: this file is the original project vision, not a description of the
+> current code.** The system was rebuilt on LangGraph with five roles, a frozen
+> TDD contract, and Docker-based isolation. Two things in particular have
+> changed: the Senior Dev executes approved code in a **Docker container**, not
+> the Antigravity SDK sandbox; and the pipeline is a compiled `StateGraph`, not
+> the linear four-role FSM sketched below.
+>
+> For what is actually wired, read **[HANDOFF.md](HANDOFF.md) section 0** and
+> **[README.md](README.md)**.
+>
+> The "Do not touch" section at the bottom of this file **still applies in
+> full** and is enforced in code. The confirmation gate is non-negotiable.
+
 ## What this project is
 
 **AI Team** is a small multi-agent system that simulates a software team of

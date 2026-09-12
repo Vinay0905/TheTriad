@@ -75,7 +75,9 @@ lerna-debug.log*
 # AI Team Run Artifacts & Sandbox
 # ==============================================================================
 .runs/
-sandbox/
+# Root-anchored: a bare `sandbox/` also matched the
+# src/ai_team/execution/sandbox package and silently excluded it from commits.
+/sandbox/
 *.sqlite
 *.db
 

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-team"
+version = "0.2.0"
+description = "TriadCouncil: an auditable multi-agent TDD pipeline behind a human approval gate"
+readme = "README.md"
+requires-python = ">=3.11"
+
+dependencies = [
+    "langgraph>=0.2.0",
+    "langgraph-checkpoint-sqlite>=2.0.0",
+    "langchain-core>=0.3.0",
+    "langchain-openai>=0.2.0",
+    "langchain-groq>=0.2.0",
+    "google-genai>=1.0.0",
+    "pydantic>=2.0.0",
+    "python-dotenv>=1.0.0",
+    "fastapi>=0.111.0",
+    "uvicorn[standard]>=0.30.0",
+    "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0.0"]
+
+[project.scripts]
+triad = "ai_team.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["ai_team*"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+# tests/legacy covers the quarantined orchestration FSM and is excluded from
+# the default run. The live gate is covered by tests/integration.
+testpaths = ["tests/unit", "tests/integration"]

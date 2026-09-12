@@ -15,14 +15,14 @@ from ai_team.domain.contracts import (
 )
 from ai_team.domain.states import State, TerminalStatus
 from ai_team.execution.workspace import create_run_workspace
-from ai_team.orchestration.approval import prompt_human_approval
-from ai_team.orchestration.bundle import (
+from ai_team._legacy.orchestration.approval import prompt_human_approval
+from ai_team._legacy.orchestration.bundle import (
     create_execution_bundle,
     verify_bundle_integrity,
     BundleTamperError,
 )
 from ai_team.persistence.runs import RunPersistence
-from ai_team.providers.base import (
+from ai_team._legacy.providers.base import (
     JuniorDevProvider,
     ManagerProvider,
     ResearcherProvider,

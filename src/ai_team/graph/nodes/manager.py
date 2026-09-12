@@ -1,86 +1,189 @@
 """Manager RFC and final status reporting nodes."""
 
-import os
-from typing import Dict, Any
+from typing import Any, Dict, List
+
+from ai_team.config import get_config
 from ai_team.graph.state import TriadCouncilState
+
+# Used when the model does not return parseable criteria. Labelled as defaults
+# in the RFC so they are never mistaken for the model's own analysis.
+_DEFAULT_CRITERIA: List[str] = [
+    "Implementation satisfies the frozen test suite",
+    "Edge cases and invalid input are handled explicitly",
+    "Test process exits with code 0 in the sandbox",
+]
+_DEFAULT_ASSUMPTIONS: List[str] = [
+    "Python 3.12 standard library only unless the research audit says otherwise",
+]
+
+
+def _parse_rfc_sections(content: str) -> Dict[str, List[str]]:
+    """Pull assumption and criteria bullets out of the model's prose.
+
+    Deliberately conservative: if a section cannot be found, the caller falls
+    back to defaults and says so, rather than presenting boilerplate as though
+    the model had produced it.
+    """
+    sections: Dict[str, List[str]] = {"assumptions": [], "acceptance_criteria": []}
+    current: str = ""
+
+    for raw_line in (content or "").splitlines():
+        line = raw_line.strip()
+        lowered = line.lower().lstrip("#* ").rstrip(":")
+
+        if lowered.startswith("assumption"):
+            current = "assumptions"
+            continue
+        if lowered.startswith("acceptance criteria") or lowered.startswith("acceptance"):
+            current = "acceptance_criteria"
+            continue
+        if lowered.startswith("approach") or lowered.startswith("summary"):
+            current = ""
+            continue
+
+        if current and line[:2] in ("- ", "* "):
+            sections[current].append(line[2:].strip())
+        elif current and len(line) > 2 and line[0].isdigit() and line[1] in ".)":
+            sections[current].append(line[2:].strip())
+
+    return sections
 
 
 def manager_rfc_node(state: TriadCouncilState) -> Dict[str, Any]:
-    """
-    Manager deconstructs the task into an architectural RFC and acceptance criteria.
-    Incorporates human steering feedback if re-routed.
-    """
+    """Decompose the task into an architectural RFC and acceptance criteria."""
+    config = get_config()
     task = state["task_prompt"]
     feedback = state.get("human_feedback")
 
-    # In live mode, invokes OpenRouter; in mock mode or fallback, uses structured RFC
-    api_key = os.getenv("OPENROUTER_API_KEY")
     content = ""
-    if api_key:
+    attribution = "defaults"
+
+    if config.openrouter_api_key:
         try:
-            print("  ... Contacting Manager via OpenRouter...")
+            print(f"  ... [Manager David / {config.openrouter_model}] Drafting RFC...")
             from langchain_openai import ChatOpenAI
+
             llm = ChatOpenAI(
-                model=os.getenv("OPENROUTER_MODEL", "nex-agi/nex-n2.5-mini:free"),
+                model=config.openrouter_model,
                 base_url="https://openrouter.ai/api/v1",
-                api_key=api_key,
+                api_key=config.openrouter_api_key,
                 temperature=0.2,
                 request_timeout=30,
             )
             prompt = (
-                f"You are the Engineering Manager. Create an architectural RFC for this task:\n{task}\n"
+                "You are the Engineering Manager. Write an architectural RFC for "
+                f"this task:\n{task}\n"
             )
             if feedback:
-                prompt += f"\nCRITICAL OPERATOR GUIDANCE TO INCORPORATE:\n{feedback}\n"
+                prompt += f"\nOPERATOR STEERING GUIDANCE TO INCORPORATE:\n{feedback}\n"
             prompt += (
-                "\nOutput a structured summary with: approach, assumptions, and acceptance criteria."
+                "\nStructure the response with three headed sections: Approach, "
+                "Assumptions, and Acceptance Criteria. Use '- ' bullets under "
+                "Assumptions and Acceptance Criteria."
             )
-            response = llm.invoke(prompt)
-            content = response.content
+            content = llm.invoke(prompt).content or ""
+            attribution = f"openrouter:{config.openrouter_model}"
         except Exception as err:
-            print(f"  [Manager Notice] Live OpenRouter notice: {err} -> using structured RFC fallback")
-            content = f"Standard architectural plan for: {task}"
-            if feedback:
-                content += f" (Steered with: {feedback})"
-    else:
-        content = f"Standard RFC for: {task}"
-        if feedback:
-            content += f" (Steered with: {feedback})"
+            print(f"  [Manager David] OpenRouter unavailable: {err}")
+            content = ""
+
+    parsed = _parse_rfc_sections(content)
+    assumptions = parsed["assumptions"] or _DEFAULT_ASSUMPTIONS
+    criteria = parsed["acceptance_criteria"] or _DEFAULT_CRITERIA
+    criteria_are_defaults = not parsed["acceptance_criteria"]
+
+    summary = content.strip() or f"No RFC was generated by a model for: {task}"
+    if criteria_are_defaults:
+        summary += (
+            "\n\n(Note: acceptance criteria below are project defaults, not "
+            "model output.)"
+        )
 
     return {
         "manager_rfc": {
-            "summary": content,
-            "assumptions": ["Python 3.10+ environment", "Clean modular interfaces"],
-            "acceptance_criteria": [
-                "Execute functional code successfully",
-                "Handle edge cases and empty inputs safely",
-                "Pass all unit tests with exit code 0",
-            ],
+            "summary": summary,
+            "assumptions": assumptions,
+            "acceptance_criteria": criteria,
+            "criteria_source": "defaults" if criteria_are_defaults else attribution,
             "research_required": True,
-        }
+        },
+        "provider_attribution": {
+            **(state.get("provider_attribution") or {}),
+            "manager_rfc": attribution,
+        },
     }
 
 
-def manager_final_report_node(state: TriadCouncilState) -> Dict[str, Any]:
-    """Compile final human-readable verification report from authentic sandbox evidence."""
-    task = state["task_prompt"]
-    res = state.get("sandbox_result") or {}
-    bundle = state.get("execution_bundle") or {}
+def _attribution_lines(state: TriadCouncilState) -> str:
+    attribution = state.get("provider_attribution") or {}
+    if not attribution:
+        return ""
+    rows = "\n".join(f"| `{key}` | {value} |" for key, value in sorted(attribution.items()))
+    return (
+        "\n## Which model produced what\n\n"
+        "| Artifact | Model |\n| --- | --- |\n" + rows + "\n"
+    )
 
-    exit_code = res.get("exit_code", 1)
-    status_label = "SUCCESS" if exit_code == 0 else "FAILURE"
+
+def manager_final_report_node(state: TriadCouncilState) -> Dict[str, Any]:
+    """Compile the closing report from real evidence only."""
+    task = state["task_prompt"]
+    result = state.get("sandbox_result") or {}
+    bundle = state.get("execution_bundle") or {}
+    approval = state.get("approval_status") or "ABORTED"
+
+    # Nothing ran unless the operator approved, so an unapproved run must not
+    # be summarised in terms of exit codes or success.
+    if approval != "APPROVED":
+        if state.get("tdd_status") == "INVALID":
+            headline = "HALTED BEFORE IMPLEMENTATION"
+            explanation = (
+                "No valid test contract could be authored, so no implementation "
+                "was attempted.\n\n"
+                f"Reason: {state.get('tdd_failure_reason', 'unknown')}"
+            )
+        else:
+            headline = "ABORTED BY OPERATOR"
+            explanation = (
+                "The operator declined execution at the human steering gate. "
+                "No files were written and no commands were run."
+            )
+
+        report = (
+            f"# TriadCouncil Final Report: {task}\n\n"
+            f"**Outcome**: {headline}\n"
+            f"**Approval**: {approval}\n"
+            f"**Bundle Digest**: `{bundle.get('bundle_digest', 'n/a')}`\n"
+            f"**QA Status**: {bundle.get('qa_status', 'UNAVAILABLE')}\n\n"
+            f"{explanation}\n"
+            + _attribution_lines(state)
+        )
+        return {"final_status_report": report}
+
+    exit_code = result.get("exit_code", 1)
+    succeeded = exit_code == 0
+    status_label = "SUCCESS" if succeeded else "FAILURE"
 
     report = (
         f"# TriadCouncil Final Report: {task}\n\n"
-        f"**Execution Status**: {status_label} (Exit Code: {exit_code})\n"
+        f"**Outcome**: {status_label} (exit code {exit_code})\n"
+        f"**Approval**: {approval}\n"
+        f"**Isolation Backend**: {result.get('backend', 'unknown')}\n"
         f"**Workspace**: {bundle.get('workspace_path')}\n"
-        f"**Bundle Digest**: `{bundle.get('bundle_digest')}`\n"
-        f"**Commands Executed**: {len(res.get('commands_executed', []))}\n"
-        f"**Files Created**: {', '.join(res.get('files_created', []))}\n\n"
-        f"## Observed Sandbox Output\n```\n{res.get('stdout', '')}\n```\n"
+        f"**Bundle Digest**: `{bundle.get('bundle_digest', 'n/a')}`\n"
+        f"**QA Status**: {bundle.get('qa_status', 'UNAVAILABLE')}\n"
+        f"**Failing Tests**: {result.get('failing_tests_count', 0)}\n"
+        f"**Commands Executed**: {len(result.get('commands_executed', []))}\n"
+        f"**Files Written**: {', '.join(result.get('files_created', [])) or 'none'}\n\n"
+        f"## Sandbox stdout\n```\n{result.get('stdout', '') or '(empty)'}\n```\n"
     )
 
-    if res.get("stderr"):
-        report += f"## Stderr / Warnings\n```\n{res.get('stderr')}\n```\n"
+    if result.get("stderr"):
+        report += f"## Sandbox stderr\n```\n{result.get('stderr')}\n```\n"
+
+    if result.get("timed_out"):
+        report += "\n> The container was killed after exceeding its time budget.\n"
+
+    report += _attribution_lines(state)
 
     return {"final_status_report": report}

@@ -5,6 +5,59 @@
 
 ---
 
+## 0. What is actually wired (read this first)
+
+> [!IMPORTANT]
+> Sections 1-11 below describe the intended architecture and include aspirational
+> detail. This section states what the code does **today**. Where the two
+> disagree, this section wins.
+
+**Correct as written below:** the LangGraph topology, the five-phase flow, the
+human `interrupt()` gate, the bounded QA repair cycle, the SHA-256 execution
+bundle, and the spatial event bus.
+
+**Differs from the sections below:**
+
+| Claim elsewhere in this doc | Reality |
+| :--- | :--- |
+| Researcher uses Gemini 2.5 Flash with Google Search grounding | **Runs on Groq. There is no web search.** Citations are labelled unverified. |
+| Senior Dev executes via the Antigravity SDK | Execution is **Docker only**, behind a `SandboxRunner` protocol. The Antigravity adapter is quarantined in `src/ai_team/_legacy/`. |
+| Tournament mode: Junior 1 vs Junior 2 | Not wired. `junior_dev.py` / `senior_review.py` are quarantined. |
+| Sandbox runs an approved shell command whitelist | Exact-string allowlist resolved to **argv with no shell**. `ls` and `cat` are no longer permitted. |
+| Command whitelist matches approved prefixes | Prefix matching is gone; it accepted `...; rm -rf /`. |
+| `/api/task`, `/api/runs/{id}/resume`, `/api/office/state`, `/api/office/clock` | Not real routes. See the API table in section 9. |
+| Tests are "100% passing" | The suite was rewritten and has not been run end to end yet. |
+
+**Additional guarantees now enforced in code, not prose:**
+
+- The gate **fails closed**. Approval requires an explicit `y`/`yes`/`approve`;
+  a malformed payload, a truthy `True`, an unexpected exception, or a missing
+  `interrupt` import all abort. (`src/ai_team/graph/gate_decision.py`)
+- `test_main.py` is **digest-locked** after the TDD node, re-verified by every
+  downstream node, and the developer's output is filtered so it cannot write
+  tests at all. (`src/ai_team/graph/contract_lock.py`)
+- A test suite that **cannot fail** (for example `assertTrue(hasattr(main,
+  '__name__'))`) is rejected and fails the run. It is never substituted in.
+- QA **fails closed**. A provider outage yields `qa_passed=False`,
+  `qa_skipped=True`, and a gate that reads `QA unavailable` — never PASS.
+- No host execution exists. Docker missing means the run is refused.
+- No host environment is forwarded into the container, so API keys are not
+  visible to approved code.
+- `success` requires approval **and** sandbox `exit_code == 0`.
+
+**Known gaps as of this handoff:**
+
+- Per-run tokens (`/api/gate/respond`, download) are not yet implemented, so the
+  HUD cannot yet authenticate a gate decision. The server binds `127.0.0.1` by
+  default to compensate. The insecure "newest workspace on disk" download
+  fallback has been **removed**, so the TopBar download link 404s until the
+  frontend pass lands.
+- Office choreography is still hardcoded in `server.py` and still sleeps on the
+  worker thread. Replacing it with a server-side `OfficeDirector` is planned.
+- The frontend has not yet been updated for any of the above.
+
+---
+
 ## 1. Executive Summary & Core Identity
 
 **TriadCouncil** is an autonomous multi-agent software engineering system built natively on **LangGraph (0.2+)** and **FastAPI**, with a real-time **3D Virtual AI Office HUD** (React + TypeScript + Three.js/Canvas).
@@ -90,6 +143,11 @@ Unlike conventional multi-agent frameworks where conversational agents chat in a
 ## 3. The 5 Council Roles & Model Specializations
 
 To prevent single-model bias, systemic blindspots, and vendor lock-in, every role in the Council is deliberately assigned to the provider best suited to its operational constraints:
+
+> [!WARNING]
+> Three rows below are aspirational, not current. The **Researcher** runs on
+> Groq with no web search; the **Senior Dev** executes via Docker, not
+> Antigravity; and **Tournament Competitors** are not wired. See section 0.
 
 | Role Name | Persona | Primary Provider / Model | Backend Integration | Core Responsibility | Economic Profile |
 | :--- | :--- | :--- | :--- | :--- | :--- |
@@ -279,6 +337,10 @@ TriadCouncil/
 ├── run_server.py               # Standalone FastAPI server launcher (uvicorn)
 ├── .env.example                # Canonical template for all environment variables
 │
+├── docker/
+│   └── sandbox.Dockerfile      # python:3.12-slim + pinned pytest; execution image
+├── pyproject.toml              # Package metadata, deps, pytest config
+│
 ├── docs/                       # Architectural records & specifications
 │   ├── architecture.md         # Detailed LangGraph topology & node specifications
 │   ├── backends.md             # Model evaluation & provider trade-offs
@@ -297,25 +359,37 @@ TriadCouncil/
 │   │   ├── budgets.py          # Operational resource ceilings (tokens, time, calls)
 │   │   └── states.py           # State enum and terminal status classifications
 │   │
-│   ├── graph/                  # LangGraph StateGraph engine
+│   ├── graph/                  # LangGraph StateGraph engine (the only pipeline)
 │   │   ├── state.py            # TriadCouncilState TypedDict schema
-│   │   ├── builder.py          # StateGraph wiring, nodes, edges, conditional routers
+│   │   ├── builder.py          # StateGraph wiring, edges, and the live routers
+│   │   ├── gate_decision.py    # Fail-closed parsing of operator decisions
+│   │   ├── contract_lock.py    # Test digest lock + vacuous-suite detection
 │   │   └── nodes/              # StateGraph node implementations
 │   │       ├── manager.py      # RFC formulation & final reporting
-│   │       ├── researcher.py   # Gemini live search grounding
-│   │       ├── tdd_contract.py # Frozen test harness authoring
-│   │       ├── developer.py    # Alex implementation & iterative QA repair
-│   │       ├── qa_audit.py     # Maya AST check & adversarial GLM-4-Flash audit
-│   │       ├── preflight.py    # Bundle locking & SHA-256 digest creation
-│   │       ├── human_gate.py   # LangGraph native interrupt() gate
-│   │       ├── sandbox_exec.py # Subprocess file writing & command runner
-│   │       ├── junior_dev.py   # Tournament candidate drafting
-│   │       ├── senior_review.py# Tournament judging & hybrid code synthesis
-│   │       └── redteam.py      # Dedicated adversarial FMEA authoring
+│   │       ├── researcher.py   # Groq dependency audit (NOT search-grounded)
+│   │       ├── tdd_contract.py # Authors and freezes test_main.py
+│   │       ├── developer.py    # Alex implementation; may only write main.py
+│   │       ├── qa_audit.py     # Maya AST check & adversarial GLM audit
+│   │       ├── preflight.py    # Bundle packaging & SHA-256 digest
+│   │       ├── human_gate.py   # LangGraph interrupt() gate, side-effect free
+│   │       └── sandbox_exec.py # Verify digest, write files, delegate to runner
 │   │
-│   ├── execution/              # Sandbox & Workspace management
-│   │   ├── workspace.py        # Safe atomic file writes in .runs/<run_id>/workspace/
-│   │   └── mock_sandbox.py     # Deterministic offline mock sandbox runner
+│   ├── execution/              # Sandbox & workspace management
+│   │   ├── bundle.py           # THE canonical digest: build / verify / compare
+│   │   ├── workspace.py        # Path-confined atomic writes
+│   │   ├── mock_sandbox.py     # Offline runner; not selectable as a backend
+│   │   └── sandbox/            # Isolation backends behind one protocol
+│   │       ├── base.py         # SandboxRunner protocol, SandboxResult, exit codes
+│   │       ├── allowlist.py    # Exact-match command -> argv table
+│   │       └── docker_runner.py# Locked-down `docker run`; refuses if unavailable
+│   │
+│   ├── _legacy/                # QUARANTINED. Not imported by live code.
+│   │   ├── orchestration/      # Older parallel approval FSM
+│   │   ├── routers.py          # References nodes that were never wired
+│   │   ├── junior_dev.py       # Tournament mode
+│   │   ├── senior_review.py    # Tournament judging
+│   │   ├── redteam.py          # Standalone FMEA node
+│   │   └── antigravity_dev.py  # Antigravity SDK adapter
 │   │
 │   ├── persistence/            # SQLite checkpoints & secret masking
 │   │   ├── checkpointer.py     # SqliteSaver factory for graph suspension/resumption
@@ -346,9 +420,12 @@ TriadCouncil/
 │   │
 │   └── dist/                   # Production-compiled static frontend bundle
 │
-└── tests/                      # Automated test suite (Unit & Integration)
-    ├── unit/                   # Fast isolated unit tests (contracts, budgets, syntax)
-    └── integration/            # Full LangGraph interrupt & mock pipeline integration tests
+└── tests/
+    ├── unit/                   # Gate decisions, contract lock, allowlist, digest,
+    │                           #   docker argv, QA fail-closed, routing
+    ├── integration/            # Real interrupt() suspend/resume through a
+    │                           #   compiled graph with a checkpointer
+    └── legacy/                 # Quarantined FSM tests; excluded by pytest.ini
 ```
 
 ---
@@ -357,15 +434,20 @@ TriadCouncil/
 
 The backend runs on `http://localhost:8000`:
 
+These are the routes that actually exist in [`src/ai_team/server.py`](src/ai_team/server.py). The server binds **`127.0.0.1:8000`** by default.
+
 | Endpoint | Method | Payload / Params | Description |
 | :--- | :--- | :--- | :--- |
-| `/api/task` | `POST` | `{"task": "Build a CSV parser"}` | Initiates a new LangGraph pipeline run in background. Returns `{"run_id": "thread_..."}`. |
-| `/api/runs/{run_id}/resume` | `POST` | `{"action": "approve" \| "steer" \| "abort", "guidance": "..."}` | Resumes a suspended graph from its exact SQLite checkpoint at the Human Gate. |
-| `/api/runs/{run_id}` | `GET` | None | Returns the current state, approval status, and output of a specific run. |
-| `/api/runs/{run_id}/download` | `GET` | None | Streams a **ZIP archive** containing all workspace files (`main.py`, `test_main.py`, manifests). |
-| `/api/office/state` | `GET` | None | Returns active agents, desk assignments, and current simulated clock phase. |
-| `/api/office/clock` | `GET` | None | Returns live snapshot of the simulated workday clock. |
-| `/ws/office` | `WebSocket` | N/A | Full duplex persistent stream broadcasting all spatial and pipeline events. |
+| `/api/health` | `GET` | None | Service status, whether the graph is compiled, and the active sandbox backend. |
+| `/api/tasks/start` | `POST` | `{"task": "Build a CSV parser"}` | Starts a run in the background. Returns `{"thread_id", "task", "status"}`. 409 during off-hours. |
+| `/api/gate/respond` | `POST` | `{"thread_id", "action", "guidance"}` | Resumes the suspended graph at the gate. `action` is forwarded verbatim; the gate node interprets it and **fails closed** on anything unrecognized. 404 unknown run, 409 if no gate is waiting. |
+| `/api/runs/{thread_id}` | `GET` | None | Status, approval status, and sandbox exit code for a run. |
+| `/api/runs/{thread_id}/download` | `GET` | None | Streams a ZIP of that run's workspace. 404 if unknown — there is deliberately **no** fallback to another run's files. |
+| `/ws/office` | `WebSocket` | N/A | Broadcasts all spatial and pipeline events. Never carries secrets or run tokens. |
+
+Pending: `/api/gate/respond` and the download route will require a per-run
+token (`X-Run-Token`, compared with `hmac.compare_digest`) issued by
+`/api/tasks/start`. Until then, the loopback bind is the only protection.
 
 ---
 
@@ -378,11 +460,23 @@ cp .env.example .env
 ```
 *(At minimum, `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, `GROQ_API_KEY`, and `ZHIPUAI_DEV_API_KEY` should be populated. For offline testing, use the mock flags).*
 
-### 2. Run Automated Test Suite
-The project maintains a 100% passing test suite across contracts, syntax guards, budgets, and LangGraph interrupt flows:
+### 2. Build the sandbox image (once)
+Approved code runs only inside this container, never on the host:
 ```bash
-python3 -m pytest tests/ -v
+docker build -t triadcouncil-sandbox:py312 -f docker/sandbox.Dockerfile docker/
 ```
+
+### 3. Run the test suite
+```bash
+python3 -m pytest -q
+```
+The suite exercises the guarantees directly: real `interrupt()` suspend/resume,
+refusal leaving the workspace empty, tampered bundles refused before any write,
+command injection rejected, Docker absence never invoking host Python, contract
+modification detected, and a rate-limited auditor never rendering as a pass.
+
+`tests/legacy/` covers the quarantined orchestration FSM and is excluded from
+the default run via `pytest.ini`.
 
 ### 3. Run via Headless CLI
 ```bash
@@ -407,10 +501,12 @@ Open your browser at `http://localhost:5173`. Enter a prompt in the top HUD bar,
 
 ## 11. Known Gotchas & Design Rules for Future AI Maintainers
 
-1. **Antigravity SDK Key Convention**: The Google Antigravity SDK reads `GEMINI_API_KEY`. Never rename this environment variable to `ANTIGRAVITY_API_KEY`.
-2. **LangGraph 0.2 `interrupt()` Behavior**:
-   - The graph suspension relies on `langgraph.types.interrupt`.
-   - When running under pytest, mock the interrupt or pass a custom `Command(resume=...)` to prevent blocking the test runner.
-3. **AST Syntax Healing**: LLMs occasionally emit truncated code due to token limits. Always use `utils.repair_truncated_python_code()` before failing on a syntax check; it automatically appends missing quotes, parentheses, and indentation blocks.
-4. **Command Whitelist Enforcement**: Never allow arbitrary shell commands in `sandbox_exec.py`. All commands must match approved prefixes (`python3 -m unittest`, `pytest`, `python3 main.py`).
-5. **No Infinite QA Loops**: The QA repair cycle between Alex and Maya is strictly bounded by `MAX_QA_REPAIR_CYCLES = 2`. If Maya rejects the code twice, the system must not loop forever; it must package the current state and escalate directly to the Human Gate with Maya's audit notes.
+1. **Antigravity SDK Key Convention**: The Google Antigravity SDK reads `GEMINI_API_KEY`. Never rename this environment variable to `ANTIGRAVITY_API_KEY`. (The adapter itself is quarantined in `src/ai_team/_legacy/`, but the constraint stands if it is ever revived.)
+2. **`interrupt()` re-runs its node from the top on resume.** This is the single most common source of bugs here. A side effect placed *before* `interrupt()` fires again on every resume — which is exactly why the Whiteboard gate event was moved out of `human_gate.py` and into the server, after `stream()` halts. Keep the gate node side-effect free.
+3. **`SqliteSaver.from_conn_string()` returns a context manager, not a saver.** Compiling the graph with the un-entered object silently breaks durable resume. Use `open_checkpointer()` and build the graph *inside* the context; the server does this in its FastAPI `lifespan`.
+4. **Never repair or substitute a test file.** `utils.repair_truncated_python_code()` is for *implementation* code that was truncated mid-generation. Applying it, or any fallback, to `test_main.py` breaks the digest lock and destroys the contract. An invalid test suite must fail the run.
+5. **Command allowlisting is exact-match, not prefix-match.** Prefix matching accepted `python3 -m unittest test_main.py; rm -rf /`. Add new commands as whole-string keys in `execution/sandbox/allowlist.py`, mapped to an argv list. Never reintroduce `shell=True`.
+6. **No host environment reaches the container.** Only `PYTHONDONTWRITEBYTECODE`, `PYTHONUNBUFFERED`, and `PYTHONPATH` are set. Do not add `-e` passthroughs; approved code must not be able to read provider keys.
+7. **Failing closed is the rule everywhere.** A provider outage must never render as a pass, an approval, or a success. If a role is unavailable, say so and let the human decide.
+8. **No Infinite QA Loops**: The repair cycle is bounded by `MAX_QA_REPAIR_CYCLES = 2`. Note that `repair_attempts` increments **only on a failed audit** — incrementing on success miscounted the budget. An *unavailable* auditor consumes no attempts, because there is no feedback to repair against.
+9. **Never add a gate bypass.** No `--yes`, no trusted mode, no config option, no "skip if CI". If automation is ever needed it must be a separate, clearly-labelled binary, not a flag on the default path.

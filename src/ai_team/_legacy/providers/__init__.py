@@ -1,13 +1,13 @@
 """Provider protocols and implementations."""
 
-from ai_team.providers.base import (
+from ai_team._legacy.providers.base import (
     ManagerProvider,
     ResearcherProvider,
     JuniorDevProvider,
     SeniorReviewerProvider,
     SeniorExecutorProvider,
 )
-from ai_team.providers.mocks import (
+from ai_team._legacy.providers.mocks import (
     MockManager,
     MockResearcher,
     MockJuniorDev,

@@ -12,7 +12,7 @@ from ai_team.domain.contracts import (
     TaskPlan,
 )
 from ai_team.execution.workspace import write_bundle_files
-from ai_team.execution.mock_sandbox import MockSandboxRunner
+from ai_team._legacy.mock_sandbox import MockSandboxRunner
 
 
 class MockManager:

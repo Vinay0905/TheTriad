@@ -1,6 +1,6 @@
 """Unit tests for LangGraph conditional edge routing and circuit breakers."""
 
-from ai_team.graph.routers import route_human_gate, route_post_execution
+from ai_team._legacy.routers import route_human_gate, route_post_execution
 from ai_team.graph.state import TriadCouncilState
 
 
