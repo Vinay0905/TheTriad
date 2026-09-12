@@ -93,6 +93,13 @@ export const OFFICE_WAYPOINTS: Record<string, Waypoint> = {
     z: 1.8,
     neighbors: ['aisle_south_west', 'corridor_west'],
   },
+  exit: {
+    id: 'exit',
+    name: 'Studio Exit',
+    x: -7.25,
+    z: 2.8,
+    neighbors: ['corridor_west'],
+  },
   whiteboard: {
     id: 'whiteboard',
     name: 'Architecture Whiteboard (Center)',
@@ -170,7 +177,7 @@ export const OFFICE_WAYPOINTS: Record<string, Waypoint> = {
     name: 'West Studio Aisle',
     x: -2.9,
     z: 0.0,
-    neighbors: ['corridor_center', 'aisle_north_west', 'aisle_south_west', 'pantry', 'coffee_lounge'],
+    neighbors: ['corridor_center', 'aisle_north_west', 'aisle_south_west', 'pantry', 'coffee_lounge', 'exit'],
   },
   corridor_east: {
     id: 'corridor_east',

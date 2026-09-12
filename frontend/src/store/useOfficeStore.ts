@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Agent, AgentAnimation, GateState, TerminalLog, ProjectDelivery, CameraPreset } from '../types/office';
+import { Agent, AgentAnimation, GateState, TerminalLog, ProjectDelivery, CameraPreset, OfficeClock } from '../types/office';
 
 interface OfficeState {
   agents: Record<string, Agent>;
@@ -20,6 +20,7 @@ interface OfficeState {
   isDraggingAgent: boolean;
   cameraPreset: CameraPreset;
   ambientCirculation: boolean;
+  officeClock: OfficeClock;
 
   // Actions
   toggleLeftPanel: () => void;
@@ -42,6 +43,8 @@ interface OfficeState {
   closeDelivery: () => void;
   setObjective: (objective: string) => void;
   setRunning: (running: boolean, threadId?: string) => void;
+  setOfficeClock: (clock: OfficeClock) => void;
+  setWorkforcePresent: (present: boolean) => void;
 }
 
 export const useOfficeStore = create<OfficeState>((set) => ({
@@ -63,6 +66,7 @@ export const useOfficeStore = create<OfficeState>((set) => ({
       contextBudget: '98,200 / 200k',
       speed: '62.1 tok/s',
       cost: '$5.18',
+      isPresent: true,
     },
     researcher: {
       id: 'researcher',
@@ -81,6 +85,7 @@ export const useOfficeStore = create<OfficeState>((set) => ({
       contextBudget: '185,410 / 200k',
       speed: '44.8 tok/s',
       cost: '$2.80',
+      isPresent: true,
     },
     developer: {
       id: 'developer',
@@ -99,6 +104,7 @@ export const useOfficeStore = create<OfficeState>((set) => ({
       contextBudget: '142,890 / 200k',
       speed: '78.4 tok/s',
       cost: '$3.42',
+      isPresent: true,
     },
     qa: {
       id: 'qa',
@@ -117,6 +123,7 @@ export const useOfficeStore = create<OfficeState>((set) => ({
       contextBudget: '64,120 / 200k',
       speed: '91.0 tok/s',
       cost: '$1.45',
+      isPresent: true,
     },
   },
   selectedAgentId: 'developer', // Default focus on Alex as in Stitch design
@@ -148,6 +155,12 @@ export const useOfficeStore = create<OfficeState>((set) => ({
   isDraggingAgent: false,
   cameraPreset: 'room',
   ambientCirculation: true,
+  officeClock: {
+    phase: 'WORKDAY',
+    displayTime: '09:00',
+    dayNumber: 1,
+    secondsRemaining: 1200,
+  },
 
   toggleLeftPanel: () => set((state) => ({ isLeftPanelOpen: !state.isLeftPanelOpen })),
   setLeftPanelMinimized: (minimized) => set({ isLeftPanelMinimized: minimized }),
@@ -268,4 +281,11 @@ export const useOfficeStore = create<OfficeState>((set) => ({
   setObjective: (objective) => set({ currentObjective: objective }),
   setRunning: (running, threadId) =>
     set({ isRunning: running, activeThreadId: threadId || null }),
+  setOfficeClock: (officeClock) => set({ officeClock }),
+  setWorkforcePresent: (present) =>
+    set((state) => ({
+      agents: Object.fromEntries(
+        Object.entries(state.agents).map(([id, agent]) => [id, { ...agent, isPresent: present }]),
+      ),
+    })),
 }));

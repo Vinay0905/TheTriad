@@ -3,7 +3,7 @@ import { useOfficeStore } from '../../store/useOfficeStore';
 
 type Routine = {
   agentId: 'manager' | 'researcher' | 'developer' | 'qa';
-  destination: 'pantry' | 'whiteboard' | 'meeting';
+  destination: 'pantry' | 'whiteboard' | 'meeting' | 'exit' | 'desk_alex_review';
   travelStatus: string;
   activityStatus: string;
   activityAnimation: 'Sit' | 'Type' | 'Coffee';
@@ -17,13 +17,15 @@ const HOME_DESKS: Record<Routine['agentId'], string> = {
   qa: 'desk_maya',
 };
 
-// A coordinated rhythm reads as colleagues sharing an office. It deliberately
-// avoids competing random timers and pauses immediately for real work.
+// Each person has a recognizable, bounded habit. The sequence is deliberate:
+// no two colleagues try to occupy the same shared space at once.
 const OFFICE_RHYTHM: Routine[] = [
   { agentId: 'researcher', destination: 'whiteboard', travelStatus: 'Checking the shared research board...', activityStatus: 'Comparing notes at the whiteboard...', activityAnimation: 'Type', dwellMs: 4200 },
-  { agentId: 'developer', destination: 'pantry', travelStatus: 'Taking a short coffee reset...', activityStatus: 'Coffee break — available for hand-off.', activityAnimation: 'Coffee', dwellMs: 3600 },
-  { agentId: 'qa', destination: 'meeting', travelStatus: 'Reviewing the test plan at the meeting table...', activityStatus: 'Organising edge cases and test notes...', activityAnimation: 'Type', dwellMs: 4400 },
-  { agentId: 'manager', destination: 'whiteboard', travelStatus: 'Reviewing the team board...', activityStatus: 'Preparing the next team check-in...', activityAnimation: 'Sit', dwellMs: 4000 },
+  { agentId: 'developer', destination: 'pantry', travelStatus: 'Taking a coffee reset...', activityStatus: 'Coffee in hand — available for a hand-off.', activityAnimation: 'Coffee', dwellMs: 4400 },
+  { agentId: 'qa', destination: 'desk_alex_review', travelStatus: 'Heading over with one more QA concern...', activityStatus: 'Maya: Asking Alex about another edge case...', activityAnimation: 'Type', dwellMs: 4100 },
+  { agentId: 'manager', destination: 'exit', travelStatus: 'Stepping outside for fresh air...', activityStatus: 'David: Out for air — reports will wait.', activityAnimation: 'Sit', dwellMs: 6000 },
+  { agentId: 'developer', destination: 'pantry', travelStatus: 'Making a quick espresso...', activityStatus: 'Alex: Refuelling before the next implementation pass.', activityAnimation: 'Coffee', dwellMs: 3600 },
+  { agentId: 'qa', destination: 'whiteboard', travelStatus: 'Taking test notes to the whiteboard...', activityStatus: 'Maya: Highlighting a suspicious edge case.', activityAnimation: 'Type', dwellMs: 3900 },
 ];
 
 const TRAVEL_MS = 3800;
@@ -34,15 +36,16 @@ const wait = (ms: number) => new Promise<void>((resolve) => window.setTimeout(re
 export const OfficeLife: FC = () => {
   const ambientCirculation = useOfficeStore((state) => state.ambientCirculation);
   const isRunning = useOfficeStore((state) => state.isRunning);
+  const officePhase = useOfficeStore((state) => state.officeClock.phase);
   const routineIndex = useRef(0);
 
   useEffect(() => {
-    if (!ambientCirculation || isRunning) return;
+    if (!ambientCirculation || isRunning || officePhase !== 'WORKDAY') return;
 
     let cancelled = false;
     const shouldContinue = () => {
       const state = useOfficeStore.getState();
-      return !cancelled && state.ambientCirculation && !state.isRunning;
+      return !cancelled && state.ambientCirculation && !state.isRunning && state.officeClock.phase === 'WORKDAY';
     };
 
     const runRoutine = async () => {
@@ -85,7 +88,7 @@ export const OfficeLife: FC = () => {
         }
       }
     };
-  }, [ambientCirculation, isRunning]);
+  }, [ambientCirculation, isRunning, officePhase]);
 
   return null;
 };

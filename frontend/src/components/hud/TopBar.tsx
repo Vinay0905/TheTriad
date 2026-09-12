@@ -7,11 +7,13 @@ export const TopBar: React.FC = () => {
   const isRunning = useOfficeStore((state) => state.isRunning);
   const setRunning = useOfficeStore((state) => state.setRunning);
   const setObjective = useOfficeStore((state) => state.setObjective);
+  const officeClock = useOfficeStore((state) => state.officeClock);
+  const officeClosed = officeClock.phase === 'OFF_HOURS';
 
   const handleStartTask = async (e: React.FormEvent) => {
     e.preventDefault();
     const task = inputTask.trim();
-    if (!task || isRunning) return;
+    if (!task || isRunning || officeClosed) return;
 
     setRunning(true);
     setObjective(task);
@@ -23,6 +25,7 @@ export const TopBar: React.FC = () => {
         body: JSON.stringify({ task }),
       });
       const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Unable to start the task.');
       setRunning(true, data.thread_id);
     } catch (err) {
       console.error('Failed to start task:', err);
@@ -40,7 +43,7 @@ export const TopBar: React.FC = () => {
             placeholder="Assign engineering objective (e.g., 'Build a Thread-Safe In-Memory LRU Cache with TTL')..."
             value={inputTask}
             onChange={(e) => setInputTask(e.target.value)}
-            disabled={isRunning}
+            disabled={isRunning || officeClosed}
             className="w-full bg-surface-container-low border border-border rounded-lg pl-9 pr-4 py-2 text-xs text-on-surface placeholder-gray-500 focus:outline-none focus:border-primary disabled:opacity-60 transition-colors"
           />
           <Sparkles className="w-4 h-4 text-primary absolute left-3 top-2.5" />
@@ -48,10 +51,12 @@ export const TopBar: React.FC = () => {
 
         <button
           type="submit"
-          disabled={isRunning || !inputTask.trim()}
+          disabled={isRunning || officeClosed || !inputTask.trim()}
           className="bg-primary hover:bg-primary-container disabled:opacity-50 text-black px-4 py-2 rounded-lg text-xs font-headline font-bold flex items-center gap-1.5 transition-all shadow-md shadow-primary/20"
         >
-          {isRunning ? (
+          {officeClosed ? (
+            <span>Office closed · returns 09:00</span>
+          ) : isRunning ? (
             <>
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
               <span>Team Collaborating...</span>

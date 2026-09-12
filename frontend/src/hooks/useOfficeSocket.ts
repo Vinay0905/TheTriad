@@ -4,12 +4,15 @@ import { useOfficeStore } from '../store/useOfficeStore';
 export const useOfficeSocket = () => {
   const wsRef = useRef<WebSocket | null>(null);
   const deliveryTimerRef = useRef<number | null>(null);
+  const clockOutTimerRef = useRef<number | null>(null);
   const {
     setAgentStatus,
     setAgentMovement,
     appendTerminalLog,
     openGate,
     setRunning,
+    setOfficeClock,
+    setWorkforcePresent,
   } = useOfficeStore();
 
   useEffect(() => {
@@ -83,6 +86,30 @@ export const useOfficeSocket = () => {
               }, 4200);
               break;
 
+            case 'OFFICE_CLOCK':
+              setOfficeClock({
+                phase: data.phase,
+                displayTime: data.display_time,
+                dayNumber: data.day_number,
+                secondsRemaining: data.seconds_remaining,
+              });
+              if (data.phase === 'OFF_HOURS') {
+                const anyoneStillPresent = Object.values(useOfficeStore.getState().agents)
+                  .some((agent) => agent.isPresent !== false);
+                if (anyoneStillPresent && clockOutTimerRef.current === null) {
+                  clockOutTimerRef.current = window.setTimeout(() => {
+                    useOfficeStore.getState().setWorkforcePresent(false);
+                    clockOutTimerRef.current = null;
+                  }, 4300);
+                }
+              } else {
+                if (clockOutTimerRef.current !== null) window.clearTimeout(clockOutTimerRef.current);
+                if (Object.values(useOfficeStore.getState().agents).some((agent) => agent.isPresent === false)) {
+                  setWorkforcePresent(true);
+                }
+              }
+              break;
+
             default:
               break;
           }
@@ -109,7 +136,8 @@ export const useOfficeSocket = () => {
       clearTimeout(reconnectTimeout);
       clearInterval(pingInterval);
       if (deliveryTimerRef.current !== null) window.clearTimeout(deliveryTimerRef.current);
+      if (clockOutTimerRef.current !== null) window.clearTimeout(clockOutTimerRef.current);
       wsRef.current?.close();
     };
-  }, [setAgentStatus, setAgentMovement, appendTerminalLog, openGate, setRunning]);
+  }, [setAgentStatus, setAgentMovement, appendTerminalLog, openGate, setRunning, setOfficeClock, setWorkforcePresent]);
 };

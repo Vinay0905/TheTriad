@@ -20,6 +20,14 @@ export interface Agent {
   speed?: string;
   cost?: string;
   customPosition?: [number, number, number] | null;
+  isPresent?: boolean;
+}
+
+export interface OfficeClock {
+  phase: 'WORKDAY' | 'OFF_HOURS';
+  displayTime: string;
+  dayNumber: number;
+  secondsRemaining: number;
 }
 
 export interface Waypoint {
@@ -52,4 +60,3 @@ export interface ProjectDelivery {
   success: boolean;
   summary: string;
 }
-

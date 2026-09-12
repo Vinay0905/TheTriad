@@ -3,6 +3,7 @@
 import asyncio
 import io
 import os
+import time
 import uuid
 import zipfile
 from pathlib import Path
@@ -19,10 +20,12 @@ from ai_team.domain.contracts import (
     WhiteboardGateEvent,
     TerminalLogEvent,
     ProjectCompletedEvent,
+    OfficeClockEvent,
 )
 from ai_team.graph.builder import build_triad_graph
 from ai_team.persistence.checkpointer import get_checkpointer
 from ai_team.spatial.event_bus import get_event_bus
+from ai_team.spatial.office_clock import OfficeClock
 
 app = FastAPI(title="TriadCouncil 3D: Virtual AI Office Server")
 
@@ -40,12 +43,77 @@ event_bus = get_event_bus()
 config = get_config()
 checkpointer = get_checkpointer(config.runs_dir / "checkpoints.db")
 triad_app = build_triad_graph(checkpointer=checkpointer)
+office_clock = OfficeClock()
+
+
+def clock_event() -> OfficeClockEvent:
+    snapshot = office_clock.snapshot()
+    return OfficeClockEvent(
+        phase=snapshot.phase,
+        display_time=snapshot.display_time,
+        day_number=snapshot.day_number,
+        seconds_remaining=snapshot.seconds_remaining,
+    )
+
+
+async def broadcast_office_clock() -> None:
+    """Keep all tabs in sync and announce shift changes once per transition."""
+    previous_phase: Optional[str] = None
+    while True:
+        event = clock_event()
+        event_bus.dispatch(event)
+
+        if event.phase != previous_phase:
+            if event.phase == "OFF_HOURS":
+                for agent_id in ("manager", "researcher", "developer", "qa"):
+                    event_bus.dispatch(
+                        AgentStatusEvent(
+                            agent_id=agent_id,
+                            status_text="Clocking out for the day...",
+                            animation="Walk",
+                        )
+                    )
+                    event_bus.dispatch(
+                        AgentMoveEvent(
+                            agent_id=agent_id,
+                            from_node="corridor_west",
+                            to_node="exit",
+                            action="Walk",
+                        )
+                    )
+            elif previous_phase == "OFF_HOURS":
+                for agent_id, desk in {
+                    "manager": "desk_david",
+                    "researcher": "desk_elena",
+                    "developer": "desk_alex",
+                    "qa": "desk_maya",
+                }.items():
+                    event_bus.dispatch(
+                        AgentStatusEvent(
+                            agent_id=agent_id,
+                            status_text="Arriving for a new day...",
+                            animation="Walk",
+                        )
+                    )
+                    event_bus.dispatch(
+                        AgentMoveEvent(
+                            agent_id=agent_id,
+                            from_node="exit",
+                            to_node=desk,
+                            action="Walk",
+                        )
+                    )
+
+            previous_phase = event.phase
+
+        await asyncio.sleep(1)
 
 
 @app.on_event("startup")
 async def startup_event():
     """Register the main async event loop with the event bus for cross-thread broadcasts."""
     event_bus.set_main_loop(asyncio.get_running_loop())
+    asyncio.create_task(broadcast_office_clock())
     print("  ✓ [EventBus] Main async event loop registered for thread-safe cross-thread broadcasts.")
 
 
@@ -68,6 +136,27 @@ async def health():
 async def office_websocket(websocket: WebSocket):
     await event_bus.connect(websocket)
     try:
+        initial_clock = clock_event()
+        await websocket.send_json(initial_clock.model_dump())
+        if initial_clock.phase == "OFF_HOURS":
+            # A reloaded browser did not witness the original clock-out event;
+            # give it the same exit choreography before hiding the team.
+            for agent_id in ("manager", "researcher", "developer", "qa"):
+                await websocket.send_json(
+                    AgentStatusEvent(
+                        agent_id=agent_id,
+                        status_text="Clocked out for the day...",
+                        animation="Walk",
+                    ).model_dump()
+                )
+                await websocket.send_json(
+                    AgentMoveEvent(
+                        agent_id=agent_id,
+                        from_node="corridor_west",
+                        to_node="exit",
+                        action="Walk",
+                    ).model_dump()
+                )
         # Initial greeting and status
         await websocket.send_json({
             "event_type": "AGENT_STATUS",
@@ -89,6 +178,7 @@ def run_pipeline_thread(thread_id: str, task: str):
         "recursion_limit": 50,
     }
     initial_input = {"task_prompt": task}
+    manager_away_until: Optional[float] = None
 
     try:
         for event in triad_app.stream(initial_input, graph_config):
@@ -97,7 +187,24 @@ def run_pipeline_thread(thread_id: str, task: str):
 
                 # Real Office Choreography based on pipeline progression
                 if node_name == "manager_rfc_node":
-                    # Manager scopes first; Elena then begins the research hand-off.
+                    # David has scoped the work and takes a short, bounded air
+                    # break. A completed research hand-off waits for him.
+                    manager_away_until = time.monotonic() + 7
+                    event_bus.dispatch(
+                        AgentStatusEvent(
+                            agent_id="manager",
+                            status_text="David: Taking a brief air break — reports will wait.",
+                            animation="Walk",
+                        )
+                    )
+                    event_bus.dispatch(
+                        AgentMoveEvent(
+                            agent_id="manager",
+                            from_node="desk_david",
+                            to_node="exit",
+                            action="Walk",
+                        )
+                    )
                     event_bus.dispatch(
                         AgentMoveEvent(agent_id="researcher", from_node="coffee_lounge", to_node="desk_elena", action="Walk")
                     )
@@ -105,6 +212,35 @@ def run_pipeline_thread(thread_id: str, task: str):
                         AgentStatusEvent(agent_id="researcher", status_text="Elena: Investigating technical approach & dependencies...", animation="Type")
                     )
                 elif node_name == "researcher_audit_node":
+                    # The report is ready, but the team does not pretend it was
+                    # delivered while the manager is away.
+                    remaining_away = max(0.0, (manager_away_until or 0.0) - time.monotonic())
+                    if remaining_away:
+                        event_bus.dispatch(
+                            AgentStatusEvent(
+                                agent_id="researcher",
+                                status_text="Elena: Research is ready — waiting for David to return.",
+                                animation="Sit",
+                            )
+                        )
+                        time.sleep(remaining_away)
+
+                    event_bus.dispatch(
+                        AgentStatusEvent(
+                            agent_id="manager",
+                            status_text="David: Back from air break; ready for reports.",
+                            animation="Walk",
+                        )
+                    )
+                    event_bus.dispatch(
+                        AgentMoveEvent(
+                            agent_id="manager",
+                            from_node="exit",
+                            to_node="desk_david",
+                            action="Walk",
+                        )
+                    )
+                    time.sleep(2.5)
                     # Research is shared at the whiteboard before implementation.
                     event_bus.dispatch(
                         AgentMoveEvent(agent_id="researcher", from_node="desk_elena", to_node="whiteboard", action="Walk")
@@ -191,6 +327,11 @@ async def start_task(request: StartTaskRequest, background_tasks: BackgroundTask
     task = request.task.strip()
     if not task:
         raise HTTPException(status_code=400, detail="Task cannot be empty.")
+    if clock_event().phase == "OFF_HOURS":
+        raise HTTPException(
+            status_code=409,
+            detail="The office is closed. The team returns at 09:00 after off-hours.",
+        )
 
     thread_id = f"thread_{uuid.uuid4().hex[:8]}"
     ACTIVE_RUNS[thread_id] = {

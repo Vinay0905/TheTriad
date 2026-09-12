@@ -199,6 +199,28 @@ const NorthWall: React.FC<{ position: [number, number, number] }> = ({ position 
   );
 };
 
+/** Server-synchronised clock beside the presentation board. */
+const OfficeWallClock: React.FC = () => {
+  const clock = useOfficeStore((state) => state.officeClock);
+  const offHours = clock.phase === 'OFF_HOURS';
+
+  return (
+    <group position={[3.15, 2.5, -7.82]}>
+      <mesh castShadow>
+        <boxGeometry args={[1.45, 0.78, 0.08]} />
+        <meshStandardMaterial color={offHours ? '#221a22' : '#101d25'} metalness={0.45} roughness={0.32} />
+      </mesh>
+      <Html center transform distanceFactor={12} position={[0, 0, 0.055]} style={{ pointerEvents: 'none' }}>
+        <div className={`w-[126px] rounded border px-2 py-1.5 text-center font-mono shadow-xl ${offHours ? 'border-rose-400/40 bg-[#20151f]/95 text-rose-200' : 'border-cyan-300/35 bg-[#0d1922]/95 text-cyan-100'}`}>
+          <div className="text-[9px] font-bold tracking-[0.16em]">{offHours ? 'OFF HOURS' : 'TRIAD TIME'}</div>
+          <div className="mt-0.5 text-[19px] font-bold leading-none tabular-nums">{clock.displayTime}</div>
+          <div className="mt-1 text-[8px] tracking-wide opacity-75">DAY {clock.dayNumber} · {Math.ceil(clock.secondsRemaining / 60)} MIN</div>
+        </div>
+      </Html>
+    </group>
+  );
+};
+
 // 3. West Wall with Acoustic Cedar Slats & Illuminated EXIT Door
 const WestWall: React.FC<{ position: [number, number, number] }> = ({ position }) => {
   return (
@@ -814,6 +836,7 @@ export const OfficeCanvas: React.FC = () => {
 
           {/* 2. Walls */}
           <NorthWall position={[0, 0, -8.0]} />
+          <OfficeWallClock />
           <WestWall position={[-8.4, 0, 0]} />
           <EastWindowWall position={[8.4, 0, 0]} />
 
@@ -848,7 +871,7 @@ export const OfficeCanvas: React.FC = () => {
           <RoundMeetingTable position={[4.8, 0, 3.4]} />
 
           {/* 7. Active Autonomous Characters */}
-          {Object.values(agents).map((agent) => (
+          {Object.values(agents).filter((agent) => agent.isPresent !== false).map((agent) => (
             <AgentCharacter key={agent.id} agent={agent} />
           ))}
 

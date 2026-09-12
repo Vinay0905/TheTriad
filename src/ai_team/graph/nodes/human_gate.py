@@ -76,7 +76,7 @@ def human_steering_gate_node(state: TriadCouncilState) -> Dict[str, Any]:
 
     if action in ["approve", "y", "yes"]:
         triage_meta = dict(state.get("triage_metadata") or {})
-        triage_meta["command_prompt_func"] = lambda cmd: True
+        triage_meta["auto_allow_commands"] = True
         return {
             "approval_status": "APPROVED",
             "triage_metadata": triage_meta,

@@ -147,10 +147,21 @@ class ProjectCompletedEvent(BaseOfficeEvent):
     summary: str
 
 
+class OfficeClockEvent(BaseOfficeEvent):
+    """Current server-owned simulated office time and attendance phase."""
+
+    event_type: Literal["OFFICE_CLOCK"] = "OFFICE_CLOCK"
+    phase: Literal["WORKDAY", "OFF_HOURS"]
+    display_time: str
+    day_number: int
+    seconds_remaining: int
+
+
 OfficeEvent = Union[
     AgentMoveEvent,
     AgentStatusEvent,
     WhiteboardGateEvent,
     TerminalLogEvent,
     ProjectCompletedEvent,
+    OfficeClockEvent,
 ]

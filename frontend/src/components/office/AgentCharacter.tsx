@@ -27,6 +27,8 @@ export const AgentCharacter: React.FC<AgentCharacterProps> = ({ agent }) => {
   const setIsDraggingAgent = useOfficeStore((state) => state.setIsDraggingAgent);
   const setAgentPosition = useOfficeStore((state) => state.setAgentPosition);
   const isRunning = useOfficeStore((state) => state.isRunning);
+  const isGateOpen = useOfficeStore((state) => state.gate.isOpen);
+  const isDeliveryOpen = useOfficeStore((state) => state.delivery.isOpen);
 
   const isSelected = selectedAgentId === agent.id;
 
@@ -209,6 +211,10 @@ export const AgentCharacter: React.FC<AgentCharacterProps> = ({ agent }) => {
     }
   }, [agent.id]);
 
+  // Keep hook order stable while the workforce clocks out; only hide the
+  // rendered character after all hooks above have run.
+  if (agent.isPresent === false) return null;
+
   return (
     <group
       ref={groupRef}
@@ -357,44 +363,45 @@ export const AgentCharacter: React.FC<AgentCharacterProps> = ({ agent }) => {
         )}
       </group>
 
-      {/* 4. Floor Nameplate Badge (Direct Stitch 1:1 Minimalist Tag) */}
-      <Html position={[0, 0.05, 0.38]} center distanceFactor={14} style={{ pointerEvents: 'none' }}>
-        <div className="flex flex-col items-center select-none">
-          {/* Main Dark Pill Nameplate */}
-          <div
-            className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded shadow-xl border backdrop-blur-md transition-all duration-200 ${
-              isSelected || isHovered ? 'scale-110 ring-1 ring-white/30' : 'opacity-90'
-            }`}
-            style={{
-
-              backgroundColor: 'rgba(10, 14, 22, 0.94)',
-              borderColor: isSelected ? agent.color : 'rgba(255, 255, 255, 0.12)',
-              boxShadow: isSelected ? `0 0 12px ${agent.color}50` : '0 2px 8px rgba(0,0,0,0.6)',
-            }}
-          >
-            <span
-              className="w-2 h-2 rounded-full"
-              style={{
-                backgroundColor: agent.color,
-                boxShadow: `0 0 6px ${agent.color}`,
-              }}
-            />
-            <span className="text-[11px] font-mono font-bold tracking-wider text-white uppercase">
-              {agent.name}
-            </span>
-          </div>
-
-          {/* Minimal 1-line Status Subtitle when Active */}
-          {agent.statusBadge && agent.statusBadge !== 'Standing By' && agent.statusBadge !== 'Awaiting Objective' && (
+      {/* 4. Floor Nameplate Badge (Direct Stitch 1:1 Minimalist Tag - Hidden when Modal is Open) */}
+      {!isGateOpen && !isDeliveryOpen && (
+        <Html position={[0, 0.05, 0.38]} center distanceFactor={14} zIndexRange={[0, 0]} style={{ pointerEvents: 'none' }}>
+          <div className="flex flex-col items-center select-none">
+            {/* Main Dark Pill Nameplate */}
             <div
-              className="mt-1 bg-black/90 backdrop-blur-md text-[9px] font-mono text-gray-300 px-2 py-0.5 rounded border border-white/10 max-w-[170px] truncate text-center shadow-lg"
-              style={{ borderColor: `${agent.color}40` }}
+              className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded shadow-xl border backdrop-blur-md transition-all duration-200 ${
+                isSelected || isHovered ? 'scale-110 ring-1 ring-white/30' : 'opacity-90'
+              }`}
+              style={{
+                backgroundColor: 'rgba(10, 14, 22, 0.94)',
+                borderColor: isSelected ? agent.color : 'rgba(255, 255, 255, 0.12)',
+                boxShadow: isSelected ? `0 0 12px ${agent.color}50` : '0 2px 8px rgba(0,0,0,0.6)',
+              }}
             >
-              {agent.statusBadge}
+              <span
+                className="w-2 h-2 rounded-full"
+                style={{
+                  backgroundColor: agent.color,
+                  boxShadow: `0 0 6px ${agent.color}`,
+                }}
+              />
+              <span className="text-[11px] font-mono font-bold tracking-wider text-white uppercase">
+                {agent.name}
+              </span>
             </div>
-          )}
-        </div>
-      </Html>
+
+            {/* Minimal 1-line Status Subtitle when Active */}
+            {agent.statusBadge && agent.statusBadge !== 'Standing By' && agent.statusBadge !== 'Awaiting Objective' && (
+              <div
+                className="mt-1 bg-black/90 backdrop-blur-md text-[9px] font-mono text-gray-300 px-2 py-0.5 rounded border border-white/10 max-w-[170px] truncate text-center shadow-lg"
+                style={{ borderColor: `${agent.color}40` }}
+              >
+                {agent.statusBadge}
+              </div>
+            )}
+          </div>
+        </Html>
+      )}
     </group>
   );
 };

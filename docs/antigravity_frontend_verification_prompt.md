@@ -45,3 +45,27 @@ Acceptance checks:
 Return: pass/fail for every check, file-and-line references for failures,
 commands run with their true output, and the smallest safe patch only if needed.
 ```
+
+## Office-clock and personality extension
+
+```text
+Additionally verify the office-life simulation.
+
+1. `src/ai_team/spatial/office_clock.py` is server-owned and starts a fresh
+   09:00 workday only when the server process starts. Browser refreshes must
+   preserve the current simulated time.
+2. A 20-real-minute WORKDAY maps linearly from 09:00 to 17:00. OFF_HOURS lasts
+   20 real minutes, then a new day starts at 09:00.
+3. OFFICE_CLOCK events make the wall clock update in real time. At 17:00 every
+   agent walks toward `exit`, then avatars and nameplates disappear. They return
+   at the next 09:00. New tasks are rejected during OFF_HOURS.
+4. Between runs, Alex takes bounded coffee breaks more often than the other
+   habits, David takes short air breaks, Elena checks and shares research, and
+   Maya performs persistent QA follow-ups. These routines must pause for a real
+   workflow or off-hours.
+5. During the live pipeline, David's short air break causes a ready research
+   report to visibly wait; it must not be represented as delivered before he
+   returns.
+6. Run the frontend build and Python compilation. Report exact failures; do not
+   weaken the human approval or execution boundary to fix a visual issue.
+```

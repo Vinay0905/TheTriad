@@ -60,8 +60,11 @@ def sandbox_execution_node(state: TriadCouncilState) -> Dict[str, Any]:
     last_exit = 0
 
     # Allow custom prompt hook in state for headless automated testing
-    cmd_prompter = state.get("triage_metadata", {}).get(
-        "command_prompt_func", prompt_terminal_command
+    auto_allowed = state.get("triage_metadata", {}).get("auto_allow_commands", False)
+    cmd_prompter = (
+        (lambda cmd: True)
+        if auto_allowed
+        else state.get("triage_metadata", {}).get("command_prompt_func", prompt_terminal_command)
     )
 
     # Enforce Command Whitelist for safety
