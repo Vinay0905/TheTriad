@@ -31,7 +31,7 @@ export const TopBar: React.FC = () => {
   };
 
   return (
-    <header className="h-14 bg-surface/90 backdrop-blur border-b border-border px-4 flex items-center justify-between z-20 select-none">
+    <header className="h-14 bg-surface-container-lowest/95 backdrop-blur-md border-b border-border px-4 flex items-center justify-between z-20 select-none">
       {/* Search / Objective Bar */}
       <form onSubmit={handleStartTask} className="flex-1 max-w-2xl flex gap-2">
         <div className="relative flex-1">
@@ -41,15 +41,15 @@ export const TopBar: React.FC = () => {
             value={inputTask}
             onChange={(e) => setInputTask(e.target.value)}
             disabled={isRunning}
-            className="w-full bg-background border border-border rounded-lg pl-9 pr-4 py-2 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500 disabled:opacity-60"
+            className="w-full bg-surface-container-low border border-border rounded-lg pl-9 pr-4 py-2 text-xs text-on-surface placeholder-gray-500 focus:outline-none focus:border-primary disabled:opacity-60 transition-colors"
           />
-          <Sparkles className="w-4 h-4 text-amber-400 absolute left-3 top-2.5" />
+          <Sparkles className="w-4 h-4 text-primary absolute left-3 top-2.5" />
         </div>
 
         <button
           type="submit"
           disabled={isRunning || !inputTask.trim()}
-          className="bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-md"
+          className="bg-primary hover:bg-primary-container disabled:opacity-50 text-black px-4 py-2 rounded-lg text-xs font-headline font-bold flex items-center gap-1.5 transition-all shadow-md shadow-primary/20"
         >
           {isRunning ? (
             <>
@@ -65,11 +65,64 @@ export const TopBar: React.FC = () => {
         </button>
       </form>
 
-      {/* Status Badges */}
-      <div className="flex items-center gap-3 text-xs font-mono">
-        <div className="flex items-center gap-1.5 text-gray-300">
-          <span className="w-2 h-2 rounded-full bg-emerald-400" />
-          <span>Local Sandbox Ready</span>
+      {/* Telemetry Pills & Dynamic Panel Toggles */}
+      <div className="flex items-center gap-2">
+        <div className="hidden lg:flex items-center gap-2 px-3 py-1 rounded-full bg-surface-container/80 border border-border text-xs">
+          <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+          <span className="font-mono text-[11px] text-on-surface-variant">NODES:</span>
+          <span className="font-mono text-[11px] font-bold text-emerald-400">4/4 LIVE</span>
+          <span className="w-px h-3 bg-border mx-1" />
+          <span className="font-mono text-[11px] text-on-surface-variant">SANDBOX:</span>
+          <span className="font-mono text-[11px] font-semibold text-primary">ARMED</span>
+          <span className="w-px h-3 bg-border mx-1" />
+          <span className="font-mono text-[11px] text-on-surface-variant">GATE:</span>
+          <span className="font-mono text-[11px] font-semibold text-secondary">ENFORCED</span>
+        </div>
+
+        {/* Dynamic Panel Toggles */}
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => {
+              const state = useOfficeStore.getState();
+              if (!state.isLeftPanelOpen) {
+                state.toggleLeftPanel();
+                state.setLeftPanelMinimized(false);
+              } else if (state.isLeftPanelMinimized) {
+                state.setLeftPanelMinimized(false);
+              } else {
+                state.setLeftPanelMinimized(true);
+              }
+            }}
+            className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-semibold transition-all ${
+              useOfficeStore((state) => state.isLeftPanelOpen && !state.isLeftPanelMinimized)
+                ? 'bg-primary/20 text-primary border-primary/50 shadow-[0_0_10px_rgba(76,215,246,0.2)]'
+                : 'bg-surface-container text-on-surface-variant border-surface-variant/40 hover:text-on-surface'
+            }`}
+            title="Toggle / Expand Left Engineering Roster"
+          >
+            Roster {useOfficeStore((state) => state.isLeftPanelOpen && !state.isLeftPanelMinimized ? '◀' : '▶')}
+          </button>
+          <button
+            onClick={() => {
+              const state = useOfficeStore.getState();
+              if (!state.isRightPanelOpen) {
+                state.toggleRightPanel();
+                state.setRightPanelMinimized(false);
+              } else if (state.isRightPanelMinimized) {
+                state.setRightPanelMinimized(false);
+              } else {
+                state.setRightPanelMinimized(true);
+              }
+            }}
+            className={`px-3 py-1.5 rounded-lg border text-xs font-mono font-semibold transition-all ${
+              useOfficeStore((state) => state.isRightPanelOpen && !state.isRightPanelMinimized)
+                ? 'bg-primary/20 text-primary border-primary/50 shadow-[0_0_10px_rgba(76,215,246,0.2)]'
+                : 'bg-surface-container text-on-surface-variant border-surface-variant/40 hover:text-on-surface'
+            }`}
+            title="Toggle / Expand Right Telemetry Dossier"
+          >
+            Dossier {useOfficeStore((state) => state.isRightPanelOpen && !state.isRightPanelMinimized ? '▶' : '◀')}
+          </button>
         </div>
       </div>
     </header>

@@ -1,6 +1,6 @@
 import React, { useRef, useEffect, useState, useMemo } from 'react';
 import * as THREE from 'three';
-import { useFrame } from '@react-three/fiber';
+import { useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import { Agent } from '../../types/office';
 import { defaultGraph, OFFICE_WAYPOINTS } from './WaypointGraph';
@@ -13,12 +13,20 @@ interface AgentCharacterProps {
 export const AgentCharacter: React.FC<AgentCharacterProps> = ({ agent }) => {
   const groupRef = useRef<THREE.Group>(null);
   const headRef = useRef<THREE.Mesh>(null);
-  const leftArmRef = useRef<THREE.Group>(null);
-  const rightArmRef = useRef<THREE.Group>(null);
+  const beaconRef = useRef<THREE.Group>(null);
   const [isHovered, setIsHovered] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
+
+
+  const { raycaster, camera } = useThree();
+  const floorPlane = useMemo(() => new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), []);
+  const planeIntersection = useMemo(() => new THREE.Vector3(), []);
 
   const setSelectedAgent = useOfficeStore((state) => state.setSelectedAgent);
   const selectedAgentId = useOfficeStore((state) => state.selectedAgentId);
+  const setIsDraggingAgent = useOfficeStore((state) => state.setIsDraggingAgent);
+  const setAgentPosition = useOfficeStore((state) => state.setAgentPosition);
+  const isRunning = useOfficeStore((state) => state.isRunning);
 
   const isSelected = selectedAgentId === agent.id;
 
@@ -36,15 +44,56 @@ export const AgentCharacter: React.FC<AgentCharacterProps> = ({ agent }) => {
 
   // Compute A* waypoint path when target changes
   useEffect(() => {
-    if (agent.currentWaypoint !== agent.targetWaypoint) {
-      const path = defaultGraph.findPath(agent.currentWaypoint, agent.targetWaypoint);
-      if (path.length > 1) {
-        path.shift(); // Remove origin
-        pathQueueRef.current = path;
-        currentTargetRef.current = path[0] || null;
+    const targetWp = OFFICE_WAYPOINTS[agent.targetWaypoint];
+    if (!targetWp) return;
+
+    // Check if physically already at target destination
+    if (groupRef.current) {
+      const currentPos = groupRef.current.position;
+      const targetPos = new THREE.Vector3(targetWp.x, 0, targetWp.z);
+      if (currentPos.distanceTo(targetPos) < 0.15) {
+        pathQueueRef.current = [];
+        currentTargetRef.current = null;
+        if (agent.currentWaypoint !== agent.targetWaypoint) {
+          useOfficeStore.setState((state) => {
+            const ag = state.agents[agent.id];
+            if (!ag) return state;
+            return {
+              agents: {
+                ...state.agents,
+                [agent.id]: { ...ag, currentWaypoint: agent.targetWaypoint },
+              },
+            };
+          });
+        }
+        return;
       }
     }
-  }, [agent.currentWaypoint, agent.targetWaypoint]);
+
+    // Determine start node: if moving mid-flight, use nearest waypoint to current 3D position
+    let startNodeId = agent.currentWaypoint;
+    if (groupRef.current) {
+      const currentPos = groupRef.current.position;
+      startNodeId = defaultGraph.findNearestWaypoint(currentPos.x, currentPos.z);
+    }
+
+    const path = defaultGraph.findPath(startNodeId, agent.targetWaypoint);
+    if (path.length > 0) {
+      // If already at or very close to the first node in path, advance to next
+      if (groupRef.current && path.length > 1) {
+        const firstPos = new THREE.Vector3(path[0].x, 0, path[0].z);
+        if (groupRef.current.position.distanceTo(firstPos) < 0.25) {
+          path.shift();
+        }
+      }
+      pathQueueRef.current = path;
+      currentTargetRef.current = path[0] || null;
+    } else {
+      // Fallback direct move to target waypoint
+      pathQueueRef.current = [];
+      currentTargetRef.current = { x: targetWp.x, z: targetWp.z, id: agent.targetWaypoint };
+    }
+  }, [agent.targetWaypoint]);
 
   // Frame kinematics loop (Constant linear speed + rotation slerp)
   useFrame((state, delta) => {
@@ -52,6 +101,15 @@ export const AgentCharacter: React.FC<AgentCharacterProps> = ({ agent }) => {
 
     const time = state.clock.getElapsedTime();
     const pos = groupRef.current.position;
+
+    // Animate Selection Beacon / Arrow (Floating Bobbing Pointer)
+    if (beaconRef.current) {
+      beaconRef.current.position.y = badgeHeight + 1.1 + Math.sin(time * 5.0) * 0.12;
+      beaconRef.current.rotation.y += delta * 2.2;
+    }
+
+    // Skip waypoint motion while user is dragging character
+    if (isDragging) return;
 
     // 1. Waypoint movement (Constant speed 2.7 units/sec)
     if (currentTargetRef.current) {
@@ -63,11 +121,23 @@ export const AgentCharacter: React.FC<AgentCharacterProps> = ({ agent }) => {
       if (dist <= step) {
         pos.copy(targetPos);
         pathQueueRef.current.shift();
-        if (pathQueueRef.current.length > 0) {
-          currentTargetRef.current = pathQueueRef.current[0];
-        } else {
-          currentTargetRef.current = null;
-        }
+        const nextTarget = pathQueueRef.current[0] || null;
+        currentTargetRef.current = nextTarget;
+
+        // Arrived at waypoint step - keep currentWaypoint truthfully updated
+        useOfficeStore.setState((state) => {
+          const ag = state.agents[agent.id];
+          if (!ag) return state;
+          return {
+            agents: {
+              ...state.agents,
+              [agent.id]: {
+                ...ag,
+                currentWaypoint: target.id,
+              },
+            },
+          };
+        });
       } else {
         const dir = targetPos.clone().sub(pos).normalize();
         pos.addScaledVector(dir, step);
@@ -82,27 +152,26 @@ export const AgentCharacter: React.FC<AgentCharacterProps> = ({ agent }) => {
       }
     }
 
-    // 2. Procedural Animation States
+    // 2. Procedural Animation States for Architectural Figurine
     const isWalking = !!currentTargetRef.current;
     if (isWalking) {
-      // Natural walking arm swing + subtle vertical bounce
-      if (leftArmRef.current) leftArmRef.current.rotation.x = Math.sin(time * 8.5) * 0.45;
-      if (rightArmRef.current) rightArmRef.current.rotation.x = -Math.sin(time * 8.5) * 0.45;
-      groupRef.current.position.y = Math.abs(Math.sin(time * 8.5)) * 0.08;
+      // Subtle vertical bobbing during movement
+      groupRef.current.position.y = Math.abs(Math.sin(time * 7.5)) * 0.05;
+      if (headRef.current) headRef.current.rotation.x = 0.05;
     } else if (agent.animation === 'Type') {
-      // Dynamic typing at keyboard
+      // Focused working posture
       groupRef.current.position.y = 0;
-      if (leftArmRef.current) leftArmRef.current.rotation.x = -1.15 + Math.sin(time * 16) * 0.18;
-      if (rightArmRef.current) rightArmRef.current.rotation.x = -1.15 + Math.cos(time * 16) * 0.18;
-      if (headRef.current) headRef.current.rotation.x = 0.18 + Math.sin(time * 2.5) * 0.04;
+      if (headRef.current) headRef.current.rotation.x = 0.12 + Math.sin(time * 3.0) * 0.03;
     } else {
-      // Subtle idle breathing & looking around
+      // Idle standing with subtle head rotation
       groupRef.current.position.y = 0;
-      if (leftArmRef.current) leftArmRef.current.rotation.x = Math.sin(time * 1.5) * 0.05;
-      if (rightArmRef.current) rightArmRef.current.rotation.x = -Math.sin(time * 1.5) * 0.05;
-      if (headRef.current) headRef.current.rotation.y = Math.sin(time * 0.7) * 0.15;
+      if (headRef.current) {
+        headRef.current.rotation.x = 0;
+        headRef.current.rotation.y = Math.sin(time * 0.8) * 0.12;
+      }
     }
   });
+
 
   // Staggered label height per role to prevent overlapping pills
   const badgeHeight = useMemo(() => {
@@ -127,166 +196,180 @@ export const AgentCharacter: React.FC<AgentCharacterProps> = ({ agent }) => {
         e.stopPropagation();
         setSelectedAgent(agent.id);
       }}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        // A real workflow is authoritative: observation and selection stay
+        // available, but manual repositioning cannot contradict its movement.
+        if (isRunning) return;
+        setIsDragging(true);
+        setIsDraggingAgent(true);
+        setSelectedAgent(agent.id);
+        (e.target as HTMLElement)?.setPointerCapture?.(e.pointerId);
+      }}
+      onPointerUp={(e) => {
+        e.stopPropagation();
+        if (isDragging) {
+          setIsDragging(false);
+          setIsDraggingAgent(false);
+          if (groupRef.current) {
+            setAgentPosition(agent.id, [
+              groupRef.current.position.x,
+              0,
+              groupRef.current.position.z,
+            ]);
+          }
+        }
+      }}
+      onPointerMove={(e) => {
+        if (!isDragging || !groupRef.current) return;
+        e.stopPropagation();
+        raycaster.setFromCamera(e.pointer, camera);
+        if (raycaster.ray.intersectPlane(floorPlane, planeIntersection)) {
+          // Clamp position within office bounds
+          const clampedX = Math.max(-7.5, Math.min(7.5, planeIntersection.x));
+          const clampedZ = Math.max(-7.5, Math.min(7.5, planeIntersection.z));
+          groupRef.current.position.set(clampedX, 0, clampedZ);
+        }
+      }}
       onPointerOver={(e) => {
         e.stopPropagation();
         setIsHovered(true);
-        document.body.style.cursor = 'pointer';
+        document.body.style.cursor = isDragging ? 'grabbing' : 'grab';
       }}
       onPointerOut={() => {
         setIsHovered(false);
-        document.body.style.cursor = 'default';
+        if (!isDragging) {
+          document.body.style.cursor = 'default';
+        }
       }}
     >
-      {/* Selection Spotlight Halo Ring */}
+      {/* 1. Downward 3D Animated Simple Pointer (Clean & Minimalist) */}
       {isSelected && (
-        <mesh position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
-          <ringGeometry args={[0.6, 0.72, 32]} />
-          <meshBasicMaterial color={agent.color} side={THREE.DoubleSide} />
-        </mesh>
+        <group ref={beaconRef} position={[0, 1.22, 0]}>
+          {/* Simple Inverted Floating Cone Arrow pointing down */}
+          <mesh rotation={[Math.PI, 0, 0]} castShadow>
+            <coneGeometry args={[0.10, 0.24, 16]} />
+            <meshStandardMaterial
+              color={agent.color}
+              emissive={agent.color}
+              emissiveIntensity={1.5}
+              roughness={0.1}
+            />
+          </mesh>
+          {/* Subtle Beacon Halo Ring */}
+          <mesh position={[0, 0.14, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+            <torusGeometry args={[0.16, 0.015, 8, 24]} />
+            <meshBasicMaterial color={agent.color} />
+          </mesh>
+        </group>
       )}
 
-      {/* Stylized Modern Character Geometry */}
-      <group position={[0, 0.72, 0]}>
-        {/* Main Body / Torso (Tailored clothing) */}
-        <mesh position={[0, 0.26, 0]} castShadow receiveShadow>
-          <capsuleGeometry args={[0.22, 0.38, 8, 16]} />
+
+      {/* 2. Concentric Neon Halo Rings on floor (Stitch 1:1) */}
+      {isSelected && (
+        <group position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          {/* Inner Sharp Ring */}
+          <mesh>
+            <ringGeometry args={[0.38, 0.44, 32]} />
+            <meshBasicMaterial color={agent.color} side={THREE.DoubleSide} />
+          </mesh>
+          {/* Outer Faint Concentric Ring */}
+          <mesh>
+            <ringGeometry args={[0.54, 0.58, 32]} />
+            <meshBasicMaterial color={agent.color} opacity={0.4} transparent side={THREE.DoubleSide} />
+          </mesh>
+        </group>
+      )}
+
+      {/* 3. Nordic Architectural Peg Figurine / Meeple (Stitch 1:1 Design) */}
+      <group position={[0, 0, 0]}>
+        {/* Weighted Circular Base Plinth */}
+        <mesh position={[0, 0.025, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.20, 0.22, 0.05, 32]} />
+          <meshStandardMaterial color="#111827" roughness={0.4} metalness={0.6} />
+        </mesh>
+
+        {/* Elegant Tapered Conical Meeple Body */}
+        <mesh position={[0, 0.34, 0]} castShadow receiveShadow>
+          <cylinderGeometry args={[0.10, 0.19, 0.58, 32]} />
           <meshStandardMaterial
             color={agent.color}
-            roughness={0.4}
-            metalness={0.1}
+            roughness={0.3}
+            metalness={0.2}
           />
         </mesh>
 
-        {/* Collar / Shirt Accent */}
-        <mesh position={[0, 0.44, 0.05]}>
-          <boxGeometry args={[0.16, 0.1, 0.18]} />
-          <meshStandardMaterial color="#ffffff" roughness={0.3} />
+        {/* Polished Metallic Collar Accent */}
+        <mesh position={[0, 0.63, 0]}>
+          <cylinderGeometry args={[0.105, 0.105, 0.025, 32]} />
+          <meshStandardMaterial color="#cbd5e1" metalness={0.8} roughness={0.2} />
         </mesh>
 
-        {/* Head */}
-        <mesh ref={headRef} position={[0, 0.65, 0]} castShadow>
-          <sphereGeometry args={[0.18, 24, 24]} />
-          <meshStandardMaterial color="#fed7aa" roughness={0.5} />
+        {/* Natural Beechwood / Porcelain Head */}
+        <mesh ref={headRef} position={[0, 0.79, 0]} castShadow>
+          <sphereGeometry args={[0.16, 32, 32]} />
+          <meshStandardMaterial color="#fed7aa" roughness={0.4} />
         </mesh>
 
-        {/* Hair / Headgear */}
-        <mesh position={[0, 0.74, -0.02]} castShadow>
-          <sphereGeometry args={[0.17, 16, 16]} />
-          <meshStandardMaterial color="#1e293b" roughness={0.7} />
+        {/* Sleek Minimalist Architectural Cap */}
+        <mesh position={[0, 0.86, -0.02]} rotation={[-0.1, 0, 0]} castShadow>
+          <sphereGeometry args={[0.155, 24, 24, 0, Math.PI * 2, 0, Math.PI / 2]} />
+          <meshStandardMaterial color="#1e293b" roughness={0.6} />
         </mesh>
 
-        {/* Developer Over-Ear Headphones (For Alex) */}
+        {/* Subtle Tech Accents per role */}
         {agent.id === 'developer' && (
-          <group position={[0, 0.66, 0]}>
-            <mesh position={[-0.2, 0, 0]}>
-              <cylinderGeometry args={[0.06, 0.06, 0.05, 12]} />
+          /* Sleek Over-Ear Studio Ring for Alex */
+          <group position={[0, 0.79, 0]}>
+            <mesh position={[0, 0.08, 0]}>
+              <torusGeometry args={[0.17, 0.018, 8, 24, Math.PI]} />
               <meshStandardMaterial color="#0f172a" metalness={0.8} />
             </mesh>
-            <mesh position={[0.2, 0, 0]}>
-              <cylinderGeometry args={[0.06, 0.06, 0.05, 12]} />
-              <meshStandardMaterial color="#0f172a" metalness={0.8} />
+            <mesh position={[-0.17, 0, 0]}>
+              <cylinderGeometry args={[0.04, 0.04, 0.03, 12]} />
+              <meshStandardMaterial color="#06b6d4" emissive="#06b6d4" emissiveIntensity={0.5} />
             </mesh>
-            {/* Headband */}
-            <mesh position={[0, 0.16, 0]}>
-              <torusGeometry args={[0.19, 0.02, 8, 16, Math.PI]} />
-              <meshStandardMaterial color="#0f172a" metalness={0.8} />
+            <mesh position={[0.17, 0, 0]}>
+              <cylinderGeometry args={[0.04, 0.04, 0.03, 12]} />
+              <meshStandardMaterial color="#06b6d4" emissive="#06b6d4" emissiveIntensity={0.5} />
             </mesh>
           </group>
         )}
-
-        {/* Glasses (For Researcher Elena & Manager David) */}
-        {(agent.id === 'researcher' || agent.id === 'manager') && (
-          <group position={[0, 0.66, 0.16]}>
-            <mesh position={[-0.07, 0, 0]}>
-              <ringGeometry args={[0.035, 0.05, 16]} />
-              <meshBasicMaterial color="#0f172a" />
-            </mesh>
-            <mesh position={[0.07, 0, 0]}>
-              <ringGeometry args={[0.035, 0.05, 16]} />
-              <meshBasicMaterial color="#0f172a" />
-            </mesh>
-            <mesh position={[0, 0, 0]}>
-              <boxGeometry args={[0.04, 0.01, 0.01]} />
-              <meshBasicMaterial color="#0f172a" />
-            </mesh>
-          </group>
-        )}
-
-        {/* Left Arm */}
-        <group ref={leftArmRef} position={[-0.29, 0.42, 0]}>
-          <mesh position={[0, -0.2, 0]} castShadow>
-            <cylinderGeometry args={[0.06, 0.06, 0.36, 12]} />
-            <meshStandardMaterial color={agent.color} roughness={0.4} />
-          </mesh>
-          {/* Hand */}
-          <mesh position={[0, -0.4, 0]}>
-            <sphereGeometry args={[0.05, 12, 12]} />
-            <meshStandardMaterial color="#fed7aa" />
-          </mesh>
-        </group>
-
-        {/* Right Arm */}
-        <group ref={rightArmRef} position={[0.29, 0.42, 0]}>
-          <mesh position={[0, -0.2, 0]} castShadow>
-            <cylinderGeometry args={[0.06, 0.06, 0.36, 12]} />
-            <meshStandardMaterial color={agent.color} roughness={0.4} />
-          </mesh>
-          {/* Hand */}
-          <mesh position={[0, -0.4, 0]}>
-            <sphereGeometry args={[0.05, 12, 12]} />
-            <meshStandardMaterial color="#fed7aa" />
-          </mesh>
-        </group>
-
-        {/* Legs / Trousers (Dark Charcoal) */}
-        <mesh position={[-0.12, -0.32, 0]} castShadow>
-          <cylinderGeometry args={[0.07, 0.07, 0.48, 12]} />
-          <meshStandardMaterial color="#1e293b" roughness={0.7} />
-        </mesh>
-        <mesh position={[0.12, -0.32, 0]} castShadow>
-          <cylinderGeometry args={[0.07, 0.07, 0.48, 12]} />
-          <meshStandardMaterial color="#1e293b" roughness={0.7} />
-        </mesh>
-
-        {/* Shoes (Clean White / Leather) */}
-        <mesh position={[-0.12, -0.58, 0.04]} castShadow>
-          <boxGeometry args={[0.09, 0.06, 0.18]} />
-          <meshStandardMaterial color="#f8fafc" roughness={0.3} />
-        </mesh>
-        <mesh position={[0.12, -0.58, 0.04]} castShadow>
-          <boxGeometry args={[0.09, 0.06, 0.18]} />
-          <meshStandardMaterial color="#f8fafc" roughness={0.3} />
-        </mesh>
       </group>
 
-      {/* Anti-Collision Clean Floating Badge */}
-      <Html position={[0, badgeHeight, 0]} center distanceFactor={13}>
-        <div
-          className={`flex flex-col items-center pointer-events-none transition-all duration-200 ${
-            isSelected || isHovered ? 'scale-110 z-30' : 'scale-100 opacity-90'
-          }`}
-        >
-          {/* Main Agent Pill */}
+      {/* 4. Floor Nameplate Badge (Direct Stitch 1:1 Minimalist Tag) */}
+      <Html position={[0, 0.05, 0.38]} center distanceFactor={14} style={{ pointerEvents: 'none' }}>
+        <div className="flex flex-col items-center select-none">
+          {/* Main Dark Pill Nameplate */}
           <div
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full shadow-xl border backdrop-blur-md transition-colors"
+            className={`flex items-center gap-1.5 px-2.5 py-0.5 rounded shadow-xl border backdrop-blur-md transition-all duration-200 ${
+              isSelected || isHovered ? 'scale-110 ring-1 ring-white/30' : 'opacity-90'
+            }`}
             style={{
-              backgroundColor: 'rgba(15, 23, 42, 0.88)',
-              borderColor: isSelected ? agent.color : 'rgba(255, 255, 255, 0.15)',
+
+              backgroundColor: 'rgba(10, 14, 22, 0.94)',
+              borderColor: isSelected ? agent.color : 'rgba(255, 255, 255, 0.12)',
+              boxShadow: isSelected ? `0 0 12px ${agent.color}50` : '0 2px 8px rgba(0,0,0,0.6)',
             }}
           >
-            <span className="text-xs">{agent.avatarIcon}</span>
-            <span className="text-xs font-semibold text-white tracking-wide">
+            <span
+              className="w-2 h-2 rounded-full"
+              style={{
+                backgroundColor: agent.color,
+                boxShadow: `0 0 6px ${agent.color}`,
+              }}
+            />
+            <span className="text-[11px] font-mono font-bold tracking-wider text-white uppercase">
               {agent.name}
             </span>
-            <span
-              className="w-2 h-2 rounded-full animate-pulse"
-              style={{ backgroundColor: agent.color }}
-            />
           </div>
 
-          {/* Expanded Status Bubble (Shows if active, hovered, or selected) */}
-          {(isSelected || isHovered || (agent.statusBadge && agent.statusBadge !== 'Standing By' && agent.statusBadge !== 'Awaiting Objective')) && (
-            <div className="mt-1 bg-black/85 backdrop-blur-md text-[10px] font-mono text-gray-200 px-2.5 py-0.5 rounded-md border border-white/10 max-w-[180px] truncate text-center shadow-lg animate-in fade-in zoom-in-95 duration-150">
+          {/* Minimal 1-line Status Subtitle when Active */}
+          {agent.statusBadge && agent.statusBadge !== 'Standing By' && agent.statusBadge !== 'Awaiting Objective' && (
+            <div
+              className="mt-1 bg-black/90 backdrop-blur-md text-[9px] font-mono text-gray-300 px-2 py-0.5 rounded border border-white/10 max-w-[170px] truncate text-center shadow-lg"
+              style={{ borderColor: `${agent.color}40` }}
+            >
               {agent.statusBadge}
             </div>
           )}

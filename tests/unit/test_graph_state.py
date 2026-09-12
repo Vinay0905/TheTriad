@@ -1,19 +1,22 @@
-"""Unit tests for LangGraph state schema and triage node."""
+"""Unit tests for LangGraph state schema and manager RFC node."""
 
 import pytest
 from ai_team.graph.state import TriadCouncilState
-from ai_team.graph.nodes.triage import task_triage_node
+from ai_team.graph.nodes.manager import manager_rfc_node
 
 
-def test_triage_valid_prompt():
+def test_manager_rfc_valid_prompt():
     state: TriadCouncilState = {"task_prompt": "Convert CSV to JSON"}
-    result = task_triage_node(state)
-    assert result["triage_metadata"]["status"] == "TRIAGED"
-    assert result["council_round"] == 1
-    assert result["micro_repair_count"] == 0
+    result = manager_rfc_node(state)
+    assert "manager_rfc" in result
+    assert len(result["manager_rfc"]["acceptance_criteria"]) > 0
 
 
-def test_triage_empty_prompt_fails():
-    state: TriadCouncilState = {"task_prompt": "   "}
-    with pytest.raises(ValueError):
-        task_triage_node(state)
+def test_manager_rfc_incorporates_feedback():
+    state: TriadCouncilState = {
+        "task_prompt": "Convert CSV to JSON",
+        "human_feedback": "Ensure strict RFC4180 compliance",
+    }
+    result = manager_rfc_node(state)
+    assert "manager_rfc" in result
+

@@ -1,5 +1,7 @@
 export type AgentAnimation = 'Idle' | 'Walk' | 'Sit' | 'Type' | 'Coffee';
 
+export type CameraPreset = 'room' | 'pantry' | 'desks' | 'whiteboard' | 'meeting';
+
 export interface Agent {
   id: string;
   name: string;
@@ -12,6 +14,12 @@ export interface Agent {
   statusBadge: string;
   color: string;
   avatarIcon: string;
+  nodeId?: string;
+  directive?: string;
+  contextBudget?: string;
+  speed?: string;
+  cost?: string;
+  customPosition?: [number, number, number] | null;
 }
 
 export interface Waypoint {
@@ -37,3 +45,11 @@ export interface TerminalLog {
   chunk: string;
   timestamp: number;
 }
+
+export interface ProjectDelivery {
+  isOpen: boolean;
+  threadId: string;
+  success: boolean;
+  summary: string;
+}
+

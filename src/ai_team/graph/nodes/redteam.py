@@ -44,7 +44,8 @@ def redteam_fmea_node(state: TriadCouncilState) -> Dict[str, Any]:
                     prompt = (
                         f"You are the Adversarial QA & Security Auditor. Attack this software plan:\n"
                         f"Task: {task}\nRFC: {rfc.get('summary')}\n"
-                        "List 3 critical failure modes and 2 specific negative unit test names to break this code."
+                        "List 3 critical failure modes and 2 specific negative unit test names to break this code.\n"
+                        "CRITICAL: Write your entire response strictly in English. Do not use Chinese."
                     )
                     resp = llm_qa.invoke(prompt)
                     if resp and resp.content:

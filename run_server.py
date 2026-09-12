@@ -24,4 +24,5 @@ if __name__ == "__main__":
         port=config.server_port,
         app_dir=str(src_path),
         reload=True,
+        reload_dirs=[str(src_path)],
     )

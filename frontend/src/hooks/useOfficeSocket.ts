@@ -63,6 +63,11 @@ export const useOfficeSocket = () => {
                 'stdout',
                 `\n[PROJECT COMPLETED] ${data.summary}`
               );
+              useOfficeStore.getState().openDelivery(
+                data.thread_id,
+                data.success,
+                data.summary
+              );
               break;
 
             default:

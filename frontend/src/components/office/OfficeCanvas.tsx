@@ -1,512 +1,773 @@
-import React, { Suspense, useMemo } from 'react';
+import React, { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
 import { OrbitControls, ContactShadows } from '@react-three/drei';
+
 import { useOfficeStore } from '../../store/useOfficeStore';
 import { AgentCharacter } from './AgentCharacter';
+import { OfficeLife } from './OfficeLife';
 
 // ============================================================================
-// Modern Architectural 3D Office Environment
-// Style: High-End Scandinavian Tech Studio / Silicon Valley Miniature
+// STITCH NORDIC STUDIO HUD - 3D ARCHITECTURAL ROOM
+// Palette:
+//   Floor: Smoked walnut parquet (#211b19), separated from warmer desks
+//   Background: Deep Obsidian (#070a10)
+//   Left Wall: Acoustic Cedar Slats (#7e5a36 / #926940) + Neon Green EXIT Door
+//   Right Wall: Oslo Skyline Panoramic Windows with Cityscape Silhouettes
+//   Center Hub: Dual Modern Workstation Pods (North: David & Elena, South: Alex & Maya)
+//   West Corner: Carrara Marble Espresso Bar with steam
+//   East Corner: Round Nordic Birch Meeting Table with Pendant Light
+//   North Wall: Wall-Mounted Glass Whiteboard with Colored Sticky Notes
 // ============================================================================
 
+// 1. Dark Herringbone Parquet Floor
 const ParquetFloor: React.FC = () => {
-  // Generate subtle wood plank grid lines
   return (
     <group position={[0, 0, 0]}>
-      {/* Warm Wood Floor Base */}
+      {/* Warm Golden Oak Hardwood Floor Substrate */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[0, -0.01, 0]}>
-        <planeGeometry args={[18, 18]} />
+        <planeGeometry args={[19, 19]} />
         <meshStandardMaterial
-          color="#d8b48f"
-          roughness={0.4}
-          metalness={0.05}
+          color="#211b19"
+          roughness={0.46}
+          metalness={0.06}
         />
       </mesh>
 
-      {/* Decorative Woven Area Rug under Coffee Lounge */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[-4.2, 0.005, 3.2]}>
-        <planeGeometry args={[4.2, 3.8]} />
-        <meshStandardMaterial
-          color="#334155"
-          roughness={0.9}
-        />
+      {/* Decorative Parquet Slat Lines Grid */}
+      {Array.from({ length: 19 }).map((_, i) => (
+        <mesh
+          key={i}
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[-9 + i * 1.0, 0.001, 0]}
+        >
+          <planeGeometry args={[0.02, 18.8]} />
+          <meshBasicMaterial color="#120f0e" opacity={0.58} transparent />
+        </mesh>
+      ))}
+
+      {Array.from({ length: 19 }).map((_, j) => (
+        <mesh
+          key={j}
+          rotation={[-Math.PI / 2, 0, 0]}
+          position={[0, 0.001, -9 + j * 1.0]}
+        >
+          <planeGeometry args={[18.8, 0.02]} />
+          <meshBasicMaterial color="#120f0e" opacity={0.58} transparent />
+        </mesh>
+      ))}
+
+      {/* Meeting Table Area Inset Ring */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[4.8, 0.003, 3.4]}>
+        <ringGeometry args={[1.8, 1.84, 32]} />
+        <meshBasicMaterial color="#d7b889" opacity={0.14} transparent />
       </mesh>
 
-      {/* Conference Rug */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[0, 0.005, -5.5]}>
-        <circleGeometry args={[2.5, 32]} />
-        <meshStandardMaterial
-          color="#1e293b"
-          roughness={0.85}
-        />
+      {/* Coffee Bar Floor Glow Ring */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[-4.8, 0.003, 3.4]}>
+        <ringGeometry args={[1.7, 1.74, 32]} />
+        <meshBasicMaterial color="#4aaebe" opacity={0.12} transparent />
       </mesh>
     </group>
   );
 };
 
-const AcousticWoodWall: React.FC<{ position: [number, number, number] }> = ({ position }) => {
-  // Acoustic vertical timber slat feature wall
-  const slats = useMemo(() => {
-    const items = [];
-    for (let i = -7.5; i <= 7.5; i += 0.35) {
-      items.push(i);
-    }
-    return items;
-  }, []);
-
+// 2. North Wall with Glass Whiteboard & Track Lighting
+const NorthWall: React.FC<{ position: [number, number, number] }> = ({ position }) => {
   return (
     <group position={position}>
-      {/* Back Wall Base (Warm White/Greige) */}
+      {/* Wall Substrate (Deep Obsidian Blue #141923) */}
       <mesh position={[0, 2.5, 0]} receiveShadow>
-        <boxGeometry args={[18, 5, 0.2]} />
-        <meshStandardMaterial color="#f1f5f9" roughness={0.7} />
+        <boxGeometry args={[18.4, 5.2, 0.25]} />
+        <meshStandardMaterial color="#141923" roughness={0.7} />
       </mesh>
 
       {/* Baseboard */}
-      <mesh position={[0, 0.15, 0.11]} receiveShadow>
-        <boxGeometry args={[18, 0.3, 0.05]} />
-        <meshStandardMaterial color="#334155" />
+      <mesh position={[0, 0.15, 0.13]} receiveShadow>
+        <boxGeometry args={[18.4, 0.3, 0.06]} />
+        <meshStandardMaterial color="#0b0f17" />
       </mesh>
 
-      {/* Vertical Timber Slats (Accent Area behind Whiteboard & Desks) */}
-      <group position={[0, 2.5, 0.11]}>
-        {slats.map((x, idx) => (
-          <mesh key={idx} position={[x, 0, 0]} castShadow>
-            <boxGeometry args={[0.15, 4.8, 0.04]} />
-            <meshStandardMaterial color="#9a6e42" roughness={0.5} />
-          </mesh>
+      {/* Overhead Whiteboard Track Light Bar (Physical Light Source) */}
+      <group position={[0, 3.9, 0.4]}>
+        {/* Track Rail */}
+        <mesh castShadow>
+          <boxGeometry args={[4.4, 0.05, 0.05]} />
+          <meshStandardMaterial color="#0f172a" metalness={0.8} />
+        </mesh>
+        {/* Spotlight Heads & Beams */}
+        {[-1.3, 0, 1.3].map((x, idx) => (
+          <group key={idx} position={[x, -0.06, 0]}>
+            <mesh rotation={[0.45, 0, 0]} castShadow>
+              <cylinderGeometry args={[0.045, 0.07, 0.12, 16]} />
+              <meshStandardMaterial color="#1e293b" metalness={0.7} />
+            </mesh>
+            {/* Glowing Lens */}
+            <mesh position={[0, -0.05, 0.02]} rotation={[0.45, 0, 0]}>
+              <circleGeometry args={[0.06, 16]} />
+              <meshStandardMaterial color="#fffbeb" emissive="#fff4cc" emissiveIntensity={1.8} />
+            </mesh>
+            {/* Directed Spotlight onto Whiteboard */}
+            <spotLight
+              position={[0, 0, 0]}
+              target-position={[0, -2.0, -0.25]}
+              intensity={1.2}
+              distance={4.5}
+              angle={Math.PI / 4.5}
+              penumbra={0.4}
+              color="#fffbeb"
+            />
+          </group>
         ))}
       </group>
 
-      {/* Backlit Company Logo Sign "TRIAD COUNCIL" */}
-      <group position={[0, 4.2, 0.15]}>
-        <mesh castShadow>
-          <boxGeometry args={[4.2, 0.6, 0.06]} />
-          <meshStandardMaterial color="#0f172a" roughness={0.3} />
+      {/* Architectural Whiteboard */}
+      <group position={[0, 2.1, 0.16]}>
+        {/* Glass Whiteboard Pane */}
+        <mesh castShadow receiveShadow>
+          <boxGeometry args={[4.2, 2.1, 0.04]} />
+          <meshStandardMaterial
+            color="#dfe2ee"
+            roughness={0.15}
+            metalness={0.1}
+            opacity={0.96}
+            transparent
+          />
         </mesh>
-        {/* Glow backlight */}
-        <mesh position={[0, 0, -0.02]}>
-          <planeGeometry args={[4.4, 0.8]} />
-          <meshBasicMaterial color="#38bdf8" />
+        {/* Aluminum Frame */}
+        <mesh position={[0, 1.08, 0.02]} castShadow>
+          <boxGeometry args={[4.26, 0.05, 0.06]} />
+          <meshStandardMaterial color="#3d494c" metalness={0.8} />
         </mesh>
+        <mesh position={[0, -1.08, 0.02]} castShadow>
+          <boxGeometry args={[4.26, 0.05, 0.06]} />
+          <meshStandardMaterial color="#3d494c" metalness={0.8} />
+        </mesh>
+        <mesh position={[-2.13, 0, 0.02]} castShadow>
+          <boxGeometry args={[0.05, 2.16, 0.06]} />
+          <meshStandardMaterial color="#3d494c" metalness={0.8} />
+        </mesh>
+        <mesh position={[2.13, 0, 0.02]} castShadow>
+          <boxGeometry args={[0.05, 2.16, 0.06]} />
+          <meshStandardMaterial color="#3d494c" metalness={0.8} />
+        </mesh>
+
+        {/* Marker Tray */}
+        <mesh position={[0, -1.12, 0.07]} castShadow>
+          <boxGeometry args={[3.6, 0.04, 0.14]} />
+          <meshStandardMaterial color="#869397" metalness={0.8} />
+        </mesh>
+
+        {/* Sticky Notes & Architecture Sketches */}
+        <group position={[0, 0, 0.025]}>
+          {/* Yellow, Pink, Green Sticky Notes */}
+          <mesh position={[-1.4, 0.5, 0]}>
+            <planeGeometry args={[0.35, 0.35]} />
+            <meshBasicMaterial color="#fef08a" />
+          </mesh>
+          <mesh position={[-0.95, 0.5, 0]}>
+            <planeGeometry args={[0.35, 0.35]} />
+            <meshBasicMaterial color="#a7f3d0" />
+          </mesh>
+          <mesh position={[-0.5, 0.5, 0]}>
+            <planeGeometry args={[0.35, 0.35]} />
+            <meshBasicMaterial color="#fbcfe8" />
+          </mesh>
+          {/* Architecture Blueprint Boxes */}
+          <mesh position={[0.6, 0.35, 0]}>
+            <planeGeometry args={[0.9, 0.55]} />
+            <meshBasicMaterial color="#00687a" />
+          </mesh>
+          <mesh position={[1.6, 0.35, 0]}>
+            <planeGeometry args={[0.9, 0.55]} />
+            <meshBasicMaterial color="#0284c7" />
+          </mesh>
+        </group>
+
+        {/* Header Tag Pill */}
+        <group position={[0, 1.25, 0.04]}>
+          <mesh>
+            <boxGeometry args={[2.4, 0.3, 0.03]} />
+            <meshStandardMaterial color="#0a0e16" />
+          </mesh>
+          <mesh position={[0, 0, 0.02]}>
+            <planeGeometry args={[2.3, 0.24]} />
+            <meshBasicMaterial color="#06b6d4" opacity={0.25} transparent />
+          </mesh>
+        </group>
       </group>
     </group>
   );
 };
 
-const PanoramicWindowWall: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+// 3. West Wall with Acoustic Cedar Slats & Illuminated EXIT Door
+const WestWall: React.FC<{ position: [number, number, number] }> = ({ position }) => {
   return (
     <group position={position}>
-      {/* Left Solid Wall Ends */}
-      <mesh position={[0, 2.5, -6.5]} receiveShadow>
-        <boxGeometry args={[0.3, 5, 5]} />
-        <meshStandardMaterial color="#f1f5f9" roughness={0.7} />
-      </mesh>
-      <mesh position={[0, 2.5, 6.5]} receiveShadow>
-        <boxGeometry args={[0.3, 5, 5]} />
-        <meshStandardMaterial color="#f1f5f9" roughness={0.7} />
+      {/* Wall Substrate */}
+      <mesh position={[0, 2.5, 0]} receiveShadow>
+        <boxGeometry args={[0.25, 5.2, 18.4]} />
+        <meshStandardMaterial color="#141923" roughness={0.7} />
       </mesh>
 
-      {/* Window Header & Sill */}
-      <mesh position={[0, 4.6, 0]} castShadow>
-        <boxGeometry args={[0.3, 0.8, 8]} />
-        <meshStandardMaterial color="#1e293b" />
-      </mesh>
-      <mesh position={[0, 0.3, 0]} castShadow>
-        <boxGeometry args={[0.35, 0.6, 8]} />
-        <meshStandardMaterial color="#1e293b" />
-      </mesh>
+      {/* Vertical Cedar Acoustic Slats */}
+      {Array.from({ length: 16 }).map((_, i) => (
+        <mesh
+          key={i}
+          position={[0.14, 2.5, -6 + i * 0.45]}
+          castShadow
+        >
+          <boxGeometry args={[0.04, 4.8, 0.16]} />
+          <meshStandardMaterial
+            color={i % 2 === 0 ? '#7e5a36' : '#926940'}
+            roughness={0.6}
+          />
+        </mesh>
+      ))}
 
-      {/* Black Window Mullions / Frames */}
-      <mesh position={[0, 2.5, -2]} castShadow>
-        <boxGeometry args={[0.15, 3.8, 0.1]} />
-        <meshStandardMaterial color="#0f172a" />
-      </mesh>
-      <mesh position={[0, 2.5, 2]} castShadow>
-        <boxGeometry args={[0.15, 3.8, 0.1]} />
-        <meshStandardMaterial color="#0f172a" />
-      </mesh>
-      <mesh position={[0, 2.5, 0]} castShadow>
-        <boxGeometry args={[0.15, 0.1, 8]} />
-        <meshStandardMaterial color="#0f172a" />
-      </mesh>
-
-      {/* Glass Pane with subtle reflection and sky tint */}
-      <mesh position={[-0.05, 2.5, 0]}>
-        <planeGeometry args={[8, 3.8]} />
-        <meshPhysicalMaterial
-          color="#bae6fd"
-          transmission={0.85}
-          opacity={0.35}
-          transparent
-          roughness={0.05}
-          ior={1.5}
-        />
-      </mesh>
-
-      {/* Outside City Sky Backdrop */}
-      <mesh position={[-3.5, 2.5, 0]} rotation={[0, Math.PI / 2, 0]}>
-        <planeGeometry args={[20, 10]} />
-        <meshBasicMaterial color="#e0f2fe" />
-      </mesh>
+      {/* Studio Entrance Door with Illuminated EXIT */}
+      <group position={[0.14, 1.8, 2.8]}>
+        {/* Door Frame */}
+        <mesh castShadow>
+          <boxGeometry args={[0.06, 3.6, 1.9]} />
+          <meshStandardMaterial color="#3d494c" metalness={0.7} />
+        </mesh>
+        {/* Frosted Glass Door Leaf */}
+        <mesh position={[0.02, 0, 0]}>
+          <boxGeometry args={[0.02, 3.4, 1.7]} />
+          <meshPhysicalMaterial
+            color="#4cd7f6"
+            transmission={0.8}
+            opacity={0.3}
+            transparent
+            roughness={0.1}
+          />
+        </mesh>
+        {/* Stainless Door Handle */}
+        <mesh position={[0.05, 0, 0.7]}>
+          <cylinderGeometry args={[0.02, 0.02, 0.8, 12]} />
+          <meshStandardMaterial color="#dfe2ee" metalness={0.9} />
+        </mesh>
+        {/* Illuminated Green EXIT Badge */}
+        <group position={[0.05, 1.95, 0]}>
+          <mesh>
+            <boxGeometry args={[0.04, 0.28, 0.8]} />
+            <meshStandardMaterial color="#064e3b" emissive="#10b981" emissiveIntensity={0.6} />
+          </mesh>
+        </group>
+      </group>
     </group>
   );
 };
 
-const ModernWorkstation: React.FC<{
+// 4. East Wall: Panoramic Floor-to-Ceiling Oslo Cityscape Windows
+const EastWindowWall: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+  return (
+    <group position={position}>
+      {/* Structural Framing Header & Sill */}
+      <mesh position={[0, 4.8, 0]} castShadow>
+        <boxGeometry args={[0.3, 0.6, 18.4]} />
+        <meshStandardMaterial color="#1e2533" />
+      </mesh>
+      <mesh position={[0, 0.2, 0]} castShadow>
+        <boxGeometry args={[0.3, 0.4, 18.4]} />
+        <meshStandardMaterial color="#1e2533" />
+      </mesh>
+
+      {/* Vertical Mullions */}
+      {[-6, -3, 0, 3, 6].map((zPos, idx) => (
+        <mesh key={idx} position={[0, 2.5, zPos]} castShadow>
+          <boxGeometry args={[0.2, 4.2, 0.12]} />
+          <meshStandardMaterial color="#253245" metalness={0.6} />
+        </mesh>
+      ))}
+
+      {/* Horizontal Transom Bar */}
+      <mesh position={[0, 2.5, 0]} castShadow>
+        <boxGeometry args={[0.18, 0.1, 18.4]} />
+        <meshStandardMaterial color="#1d2737" metalness={0.6} />
+      </mesh>
+
+      {/* Glass Pane */}
+      <mesh position={[-0.04, 2.5, 0]}>
+        <boxGeometry args={[0.02, 4.2, 18.2]} />
+        <meshPhysicalMaterial
+          color="#acedff"
+          transmission={0.88}
+          opacity={0.3}
+          transparent
+          roughness={0.05}
+        />
+      </mesh>
+
+      {/* Distant Oslo Night Skyline Backdrop */}
+      <group position={[2.8, 2.5, 0]} rotation={[0, -Math.PI / 2, 0]}>
+        {/* Night Gradient Plane */}
+        <mesh position={[0, 0, 0]}>
+          <planeGeometry args={[24, 8]} />
+          <meshBasicMaterial color="#0c1624" />
+        </mesh>
+        {/* Skyscraper Silhouettes */}
+        {[
+          { x: -7, h: 4.5, w: 2.2, color: '#080e18' },
+          { x: -4, h: 3.5, w: 1.8, color: '#060c14' },
+          { x: -1, h: 5.2, w: 2.4, color: '#080e18' },
+          { x: 3, h: 4.0, w: 2.0, color: '#050a10' },
+          { x: 6, h: 3.2, w: 1.6, color: '#080e18' },
+        ].map((b, i) => (
+          <mesh key={i} position={[b.x, -4 + b.h / 2, 0.05]}>
+            <planeGeometry args={[b.w, b.h]} />
+            <meshBasicMaterial color={b.color} />
+          </mesh>
+        ))}
+      </group>
+    </group>
+  );
+};
+
+// 5. Dual Modern Workstation Bench Pod (Shared Table for 2 Agents)
+const DualBenchPod: React.FC<{
   position: [number, number, number];
-  rotation?: [number, number, number];
-  deskColor?: string;
-  nameTag?: string;
-}> = ({ position, rotation = [0, 0, 0], deskColor = '#f8fafc' }) => (
-  <group position={position} rotation={rotation}>
-    {/* Desk Tabletop (Light Oak / Clean White with Chamfered Edges) */}
-    <mesh position={[0, 0.72, 0]} castShadow receiveShadow>
-      <boxGeometry args={[1.7, 0.05, 0.95]} />
-      <meshStandardMaterial color={deskColor} roughness={0.3} />
-    </mesh>
-
-    {/* Modern Metal A-Frame Legs (Matte Black) */}
-    <mesh position={[-0.72, 0.35, 0]} castShadow>
-      <boxGeometry args={[0.04, 0.7, 0.8]} />
-      <meshStandardMaterial color="#1e293b" metalness={0.8} roughness={0.3} />
-    </mesh>
-    <mesh position={[0.72, 0.35, 0]} castShadow>
-      <boxGeometry args={[0.04, 0.7, 0.8]} />
-      <meshStandardMaterial color="#1e293b" metalness={0.8} roughness={0.3} />
-    </mesh>
-
-    {/* Felt Desk Mat / Pad */}
-    <mesh position={[0, 0.75, 0.05]} receiveShadow>
-      <boxGeometry args={[1.2, 0.01, 0.55]} />
-      <meshStandardMaterial color="#334155" roughness={0.8} />
-    </mesh>
-
-    {/* Dual Curved Ultra-Wide Monitors */}
-    <group position={[-0.32, 0.75, -0.22]} rotation={[0, 0.15, 0]}>
-      {/* Screen Frame */}
-      <mesh position={[0, 0.35, 0]} castShadow>
-        <boxGeometry args={[0.7, 0.42, 0.03]} />
-        <meshStandardMaterial color="#090d16" roughness={0.4} />
+  podLabel?: string;
+  leftAgent: { name: string; color: string; monitorType: 'ultrawide' | 'dual' };
+  rightAgent: { name: string; color: string; monitorType: 'dual' | 'triple' };
+  deskColor: string;
+  deskPadColor: string;
+}> = ({ position, leftAgent, rightAgent, deskColor, deskPadColor }) => {
+  return (
+    <group position={position}>
+      {/* Shared Modern Oak Dual Bench Desk */}
+      <mesh position={[0, 0.72, 0]} castShadow receiveShadow>
+        <boxGeometry args={[4.4, 0.06, 1.4]} />
+        <meshStandardMaterial color={deskColor} roughness={0.46} />
       </mesh>
-      {/* Code Screen Glow */}
-      <mesh position={[0, 0.35, 0.016]}>
-        <planeGeometry args={[0.66, 0.38]} />
-        <meshStandardMaterial
-          color="#38bdf8"
-          emissive="#0284c7"
-          emissiveIntensity={0.7}
+
+      {/* Central Cable Spine & Divider Partition */}
+      <mesh position={[0, 0.9, 0]}>
+        <boxGeometry args={[4.2, 0.28, 0.04]} />
+        <meshStandardMaterial color="#1e2533" roughness={0.7} />
+      </mesh>
+
+      {/* Matte Black Steel Legs */}
+      <mesh position={[-2.1, 0.36, 0]} castShadow>
+        <boxGeometry args={[0.06, 0.72, 1.3]} />
+        <meshStandardMaterial color="#1c2028" metalness={0.8} />
+      </mesh>
+      <mesh position={[2.1, 0.36, 0]} castShadow>
+        <boxGeometry args={[0.06, 0.72, 1.3]} />
+        <meshStandardMaterial color="#1c2028" metalness={0.8} />
+      </mesh>
+      <mesh position={[0, 0.36, 0]} castShadow>
+        <boxGeometry args={[0.06, 0.72, 1.3]} />
+        <meshStandardMaterial color="#1c2028" metalness={0.8} />
+      </mesh>
+
+      {/* Suspended Architectural Linear Pendant Light Fixture */}
+      <group position={[0, 2.5, 0]}>
+        {/* Steel Suspension Wire Drops */}
+        <mesh position={[-1.5, 0.6, 0]}>
+          <cylinderGeometry args={[0.004, 0.004, 1.2, 8]} />
+          <meshBasicMaterial color="#94a3b8" />
+        </mesh>
+        <mesh position={[1.5, 0.6, 0]}>
+          <cylinderGeometry args={[0.004, 0.004, 1.2, 8]} />
+          <meshBasicMaterial color="#94a3b8" />
+        </mesh>
+        {/* Minimalist Matte Black Aluminum Linear Housing */}
+        <mesh position={[0, 0, 0]} castShadow>
+          <boxGeometry args={[3.8, 0.06, 0.12]} />
+          <meshStandardMaterial color="#0f172a" metalness={0.8} roughness={0.2} />
+        </mesh>
+        {/* Downward Frosted LED Diffuser Strip */}
+        <mesh position={[0, -0.031, 0]}>
+          <boxGeometry args={[3.74, 0.01, 0.09]} />
+          <meshStandardMaterial
+            color="#fffdf5"
+            emissive="#fff8db"
+            emissiveIntensity={1.4}
+          />
+        </mesh>
+        {/* Downward Desk Illumination Spotlight */}
+        <spotLight
+          position={[0, -0.05, 0]}
+          intensity={2.2}
+          distance={5}
+          angle={Math.PI / 3}
+          penumbra={0.4}
+          color="#fffbeb"
         />
-      </mesh>
-      {/* Articulating Arm Stand */}
-      <mesh position={[0, 0.08, 0]}>
-        <cylinderGeometry args={[0.018, 0.018, 0.16, 12]} />
-        <meshStandardMaterial color="#0f172a" metalness={0.8} />
-      </mesh>
-    </group>
+      </group>
 
-    <group position={[0.32, 0.75, -0.22]} rotation={[0, -0.15, 0]}>
-      <mesh position={[0, 0.35, 0]} castShadow>
-        <boxGeometry args={[0.7, 0.42, 0.03]} />
-        <meshStandardMaterial color="#090d16" roughness={0.4} />
-      </mesh>
-      <mesh position={[0, 0.35, 0.016]}>
-        <planeGeometry args={[0.66, 0.38]} />
-        <meshStandardMaterial
-          color="#10b981"
-          emissive="#059669"
-          emissiveIntensity={0.6}
-        />
-      </mesh>
-      <mesh position={[0, 0.08, 0]}>
-        <cylinderGeometry args={[0.018, 0.018, 0.16, 12]} />
-        <meshStandardMaterial color="#0f172a" metalness={0.8} />
-      </mesh>
-    </group>
+      {/* --- LEFT SLOT (e.g., David or Alex) --- */}
+      <group position={[-1.2, 0.75, 0]}>
+        {/* Felt Desk Pad */}
+        <mesh position={[0, 0.005, 0.15]} receiveShadow>
+          <boxGeometry args={[1.3, 0.01, 0.6]} />
+          <meshStandardMaterial color={deskPadColor} roughness={0.9} />
+        </mesh>
 
-    {/* Mechanical Keyboard with Backlight */}
-    <mesh position={[0, 0.76, 0.12]} castShadow>
-      <boxGeometry args={[0.38, 0.018, 0.14]} />
-      <meshStandardMaterial color="#0f172a" roughness={0.3} />
-    </mesh>
-    {/* Wireless Mouse */}
-    <mesh position={[0.28, 0.76, 0.12]} castShadow>
-      <boxGeometry args={[0.07, 0.02, 0.11]} />
-      <meshStandardMaterial color="#0f172a" roughness={0.3} />
-    </mesh>
+        {/* Monitor Rig */}
+        <group position={[0, 0, -0.3]}>
+          <mesh position={[0, 0.38, 0]} castShadow>
+            <boxGeometry args={[1.0, 0.5, 0.04]} />
+            <meshStandardMaterial color="#090d16" roughness={0.4} />
+          </mesh>
+          {/* Glowing Code Display */}
+          <mesh position={[0, 0.38, 0.022]}>
+            <planeGeometry args={[0.96, 0.46]} />
+            <meshStandardMaterial
+              color={leftAgent.color}
+              emissive={leftAgent.color}
+              emissiveIntensity={0.65}
+            />
+          </mesh>
+          {/* Articulated Stand */}
+          <mesh position={[0, 0.1, 0]}>
+            <cylinderGeometry args={[0.02, 0.02, 0.2, 12]} />
+            <meshStandardMaterial color="#0b0f17" metalness={0.8} />
+          </mesh>
+        </group>
 
-    {/* Ceramic Coffee Mug on Coaster */}
-    <group position={[-0.48, 0.75, 0.1]}>
-      <mesh position={[0, 0.005, 0]}>
-        <cylinderGeometry args={[0.06, 0.06, 0.01, 16]} />
-        <meshStandardMaterial color="#78350f" />
-      </mesh>
-      <mesh position={[0, 0.05, 0]} castShadow>
-        <cylinderGeometry args={[0.045, 0.04, 0.08, 16]} />
-        <meshStandardMaterial color="#f8fafc" roughness={0.2} />
-      </mesh>
-    </group>
-
-    {/* Herman Miller-Style Ergonomic Mesh Chair */}
-    <group position={[0, 0, 0.65]}>
-      {/* Contoured Mesh Seat */}
-      <mesh position={[0, 0.46, 0]} castShadow receiveShadow>
-        <boxGeometry args={[0.5, 0.07, 0.48]} />
-        <meshStandardMaterial color="#1e293b" roughness={0.6} />
-      </mesh>
-      {/* Mesh High-Back Lumbar Support */}
-      <mesh position={[0, 0.82, 0.22]} rotation={[-0.1, 0, 0]} castShadow>
-        <boxGeometry args={[0.46, 0.65, 0.05]} />
-        <meshStandardMaterial color="#0f172a" roughness={0.5} />
-      </mesh>
-      {/* Armrests */}
-      <mesh position={[-0.24, 0.62, 0.05]} castShadow>
-        <boxGeometry args={[0.05, 0.04, 0.28]} />
-        <meshStandardMaterial color="#0f172a" />
-      </mesh>
-      <mesh position={[0.24, 0.62, 0.05]} castShadow>
-        <boxGeometry args={[0.05, 0.04, 0.28]} />
-        <meshStandardMaterial color="#0f172a" />
-      </mesh>
-      {/* Gas Lift Pneumatic Cylinder */}
-      <mesh position={[0, 0.23, 0]}>
-        <cylinderGeometry args={[0.025, 0.025, 0.42, 12]} />
-        <meshStandardMaterial color="#64748b" metalness={0.9} />
-      </mesh>
-      {/* 5-Star Caster Base */}
-      <mesh position={[0, 0.04, 0]}>
-        <cylinderGeometry args={[0.3, 0.3, 0.04, 5]} />
-        <meshStandardMaterial color="#1e293b" metalness={0.8} />
-      </mesh>
-    </group>
-  </group>
-);
-
-const ArchitecturalWhiteboard: React.FC<{ position: [number, number, number] }> = ({ position }) => (
-  <group position={position}>
-    {/* Large Frosted Glass Whiteboard Surface with Aluminium Standoffs */}
-    <mesh position={[0, 1.8, 0]} castShadow>
-      <boxGeometry args={[3.8, 2.0, 0.06]} />
-      <meshStandardMaterial
-        color="#ffffff"
-        roughness={0.1}
-        metalness={0.1}
-      />
-    </mesh>
-    {/* Top Accent Header Bar */}
-    <mesh position={[0, 2.82, 0.02]} castShadow>
-      <boxGeometry args={[3.84, 0.06, 0.08]} />
-      <meshStandardMaterial color="#0f172a" />
-    </mesh>
-
-    {/* Sticky Notes & Architecture Diagram Boxes */}
-    <group position={[0, 1.8, 0.035]}>
-      {/* Yellow Sticky Notes */}
-      <mesh position={[-1.2, 0.4, 0]}>
-        <planeGeometry args={[0.28, 0.28]} />
-        <meshBasicMaterial color="#fef08a" />
-      </mesh>
-      <mesh position={[-0.85, 0.4, 0]}>
-        <planeGeometry args={[0.28, 0.28]} />
-        <meshBasicMaterial color="#fbcfe8" />
-      </mesh>
-      <mesh position={[-0.5, 0.4, 0]}>
-        <planeGeometry args={[0.28, 0.28]} />
-        <meshBasicMaterial color="#bbf7d0" />
-      </mesh>
-
-      {/* Architecture Boxes (Simulated TDD / Flow Blueprint) */}
-      <mesh position={[0.4, 0.3, 0]}>
-        <planeGeometry args={[0.75, 0.45]} />
-        <meshBasicMaterial color="#e0f2fe" />
-      </mesh>
-      <mesh position={[1.3, 0.3, 0]}>
-        <planeGeometry args={[0.75, 0.45]} />
-        <meshBasicMaterial color="#dcfce7" />
-      </mesh>
-      <mesh position={[0.85, -0.4, 0]}>
-        <planeGeometry args={[0.9, 0.45]} />
-        <meshBasicMaterial color="#fef3c7" />
-      </mesh>
-    </group>
-
-    {/* Marker Tray */}
-    <mesh position={[0, 0.78, 0.06]} castShadow>
-      <boxGeometry args={[3.2, 0.04, 0.12]} />
-      <meshStandardMaterial color="#475569" metalness={0.8} />
-    </mesh>
-  </group>
-);
-
-const DesignerLounge: React.FC<{ position: [number, number, number] }> = ({ position }) => (
-  <group position={position}>
-    {/* Modular Scandinavian Sectional Sofa (Warm Teal/Petrol Blue) */}
-    <group position={[0, 0, 0]}>
-      <mesh position={[0, 0.25, 0]} castShadow receiveShadow>
-        <boxGeometry args={[2.2, 0.32, 0.95]} />
-        <meshStandardMaterial color="#0369a1" roughness={0.75} />
-      </mesh>
-      <mesh position={[0, 0.65, -0.4]} castShadow>
-        <boxGeometry args={[2.2, 0.5, 0.22]} />
-        <meshStandardMaterial color="#0369a1" roughness={0.75} />
-      </mesh>
-      {/* Decorative Throw Cushions */}
-      <mesh position={[-0.7, 0.52, -0.22]} rotation={[0.2, 0.2, 0]}>
-        <boxGeometry args={[0.35, 0.35, 0.12]} />
-        <meshStandardMaterial color="#f59e0b" roughness={0.8} />
-      </mesh>
-      <mesh position={[0.7, 0.52, -0.22]} rotation={[0.2, -0.2, 0]}>
-        <boxGeometry args={[0.35, 0.35, 0.12]} />
-        <meshStandardMaterial color="#f8fafc" roughness={0.8} />
-      </mesh>
-    </group>
-
-    {/* Marble Round Coffee Table */}
-    <group position={[0, 0, 1.1]}>
-      <mesh position={[0, 0.32, 0]} castShadow receiveShadow>
-        <cylinderGeometry args={[0.55, 0.55, 0.04, 32]} />
-        <meshStandardMaterial color="#f8fafc" roughness={0.2} />
-      </mesh>
-      <mesh position={[0, 0.15, 0]}>
-        <cylinderGeometry args={[0.04, 0.04, 0.3, 12]} />
-        <meshStandardMaterial color="#0f172a" metalness={0.8} />
-      </mesh>
-      <mesh position={[0, 0.01, 0]}>
-        <cylinderGeometry args={[0.3, 0.3, 0.02, 24]} />
-        <meshStandardMaterial color="#0f172a" metalness={0.8} />
-      </mesh>
-    </group>
-
-    {/* Espresso Bar Credenza */}
-    <group position={[-2.4, 0, 0]} rotation={[0, Math.PI / 2, 0]}>
-      <mesh position={[0, 0.45, 0]} castShadow receiveShadow>
-        <boxGeometry args={[1.5, 0.9, 0.6]} />
-        <meshStandardMaterial color="#1e293b" roughness={0.4} />
-      </mesh>
-      {/* Italian Espresso Machine */}
-      <mesh position={[0, 1.05, 0]} castShadow>
-        <boxGeometry args={[0.45, 0.35, 0.38]} />
-        <meshStandardMaterial color="#e2e8f0" metalness={0.9} roughness={0.1} />
-      </mesh>
-      {/* Glowing Coffee On-LED */}
-      <mesh position={[0.16, 1.1, 0.2]}>
-        <sphereGeometry args={[0.018, 8, 8]} />
-        <meshBasicMaterial color="#22c55e" />
-      </mesh>
-    </group>
-  </group>
-);
-
-const PottedFiddleLeafFig: React.FC<{ position: [number, number, number] }> = ({ position }) => (
-  <group position={position}>
-    {/* Ribbed Ceramic Pot */}
-    <mesh position={[0, 0.35, 0]} castShadow>
-      <cylinderGeometry args={[0.32, 0.24, 0.7, 24]} />
-      <meshStandardMaterial color="#fafaf9" roughness={0.3} />
-    </mesh>
-    {/* Soil */}
-    <mesh position={[0, 0.68, 0]}>
-      <cylinderGeometry args={[0.3, 0.3, 0.04, 16]} />
-      <meshStandardMaterial color="#3f2e1e" roughness={0.9} />
-    </mesh>
-    {/* Main Stem */}
-    <mesh position={[0, 1.2, 0]}>
-      <cylinderGeometry args={[0.035, 0.045, 1.1, 8]} />
-      <meshStandardMaterial color="#57412b" roughness={0.8} />
-    </mesh>
-    {/* Sculpted Large Broad Leaves */}
-    {[
-      { y: 0.9, r: 0.4, rot: 0.2 },
-      { y: 1.15, r: 0.45, rot: 1.8 },
-      { y: 1.35, r: 0.5, rot: 3.4 },
-      { y: 1.55, r: 0.48, rot: 4.9 },
-      { y: 1.75, r: 0.42, rot: 1.1 },
-    ].map((leaf, idx) => (
-      <group key={idx} position={[0, leaf.y, 0]} rotation={[0.3, leaf.rot, 0.4]}>
-        <mesh position={[0.25, 0, 0]} castShadow>
-          <boxGeometry args={[0.42, 0.015, 0.28]} />
-          <meshStandardMaterial color="#15803d" roughness={0.5} />
+        {/* Keyboard & Mouse */}
+        <mesh position={[0, 0.02, 0.22]} castShadow>
+          <boxGeometry args={[0.42, 0.018, 0.15]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.3} />
+        </mesh>
+        <mesh position={[0.3, 0.02, 0.22]} castShadow>
+          <boxGeometry args={[0.08, 0.02, 0.12]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.3} />
         </mesh>
       </group>
-    ))}
-  </group>
-);
+
+      {/* --- RIGHT SLOT (e.g., Elena or Maya) --- */}
+      <group position={[1.2, 0.75, 0]}>
+        {/* Felt Desk Pad */}
+        <mesh position={[0, 0.005, 0.15]} receiveShadow>
+          <boxGeometry args={[1.3, 0.01, 0.6]} />
+          <meshStandardMaterial color={deskPadColor} roughness={0.9} />
+        </mesh>
+
+        {/* Dual Vertical Displays */}
+        <group position={[-0.26, 0, -0.3]} rotation={[0, 0.15, 0]}>
+          <mesh position={[0, 0.38, 0]} castShadow>
+            <boxGeometry args={[0.48, 0.55, 0.04]} />
+            <meshStandardMaterial color="#090d16" roughness={0.4} />
+          </mesh>
+          <mesh position={[0, 0.38, 0.022]}>
+            <planeGeometry args={[0.44, 0.51]} />
+            <meshStandardMaterial
+              color={rightAgent.color}
+              emissive={rightAgent.color}
+              emissiveIntensity={0.65}
+            />
+          </mesh>
+          <mesh position={[0, 0.08, 0]}>
+            <cylinderGeometry args={[0.018, 0.018, 0.16, 12]} />
+            <meshStandardMaterial color="#0b0f17" metalness={0.8} />
+          </mesh>
+        </group>
+
+        <group position={[0.26, 0, -0.3]} rotation={[0, -0.15, 0]}>
+          <mesh position={[0, 0.38, 0]} castShadow>
+            <boxGeometry args={[0.48, 0.55, 0.04]} />
+            <meshStandardMaterial color="#090d16" roughness={0.4} />
+          </mesh>
+          <mesh position={[0, 0.38, 0.022]}>
+            <planeGeometry args={[0.44, 0.51]} />
+            <meshStandardMaterial
+              color={rightAgent.color}
+              emissive={rightAgent.color}
+              emissiveIntensity={0.65}
+            />
+          </mesh>
+          <mesh position={[0, 0.08, 0]}>
+            <cylinderGeometry args={[0.018, 0.018, 0.16, 12]} />
+            <meshStandardMaterial color="#0b0f17" metalness={0.8} />
+          </mesh>
+        </group>
+
+        {/* Keyboard & Mouse */}
+        <mesh position={[0, 0.02, 0.22]} castShadow>
+          <boxGeometry args={[0.42, 0.018, 0.15]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.3} />
+        </mesh>
+        <mesh position={[0.3, 0.02, 0.22]} castShadow>
+          <boxGeometry args={[0.08, 0.02, 0.12]} />
+          <meshStandardMaterial color="#0f172a" roughness={0.3} />
+        </mesh>
+      </group>
+
+    </group>
+  );
+};
+
+// 6. Carrara Marble Espresso Pantry Lab (West Corner)
+const EspressoPantry: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+  return (
+    <group position={position}>
+      {/* L-Shaped Kitchen Cabinetry Base */}
+      <group position={[0, 0, 0]}>
+        {/* Main Counter */}
+        <mesh position={[0, 0.45, 0]} castShadow receiveShadow>
+          <boxGeometry args={[2.4, 0.9, 0.9]} />
+          <meshStandardMaterial color="#251a10" roughness={0.7} />
+        </mesh>
+        {/* Carrara Marble Countertop */}
+        <mesh position={[0, 0.92, 0]} castShadow receiveShadow>
+          <boxGeometry args={[2.5, 0.06, 0.95]} />
+          <meshStandardMaterial color="#dfe2ee" roughness={0.2} metalness={0.1} />
+        </mesh>
+      </group>
+
+      {/* Italian Espresso Machine with LED & Steam */}
+      <group position={[-0.4, 0.95, 0]}>
+        <mesh position={[0, 0.25, 0]} castShadow>
+          <boxGeometry args={[0.5, 0.4, 0.4]} />
+          <meshStandardMaterial color="#37474f" metalness={0.8} roughness={0.2} />
+        </mesh>
+        {/* Chrome Portafilters & Drip Tray */}
+        <mesh position={[0, 0.05, 0.22]}>
+          <boxGeometry args={[0.42, 0.04, 0.15]} />
+          <meshStandardMaterial color="#dfe2ee" metalness={0.9} />
+        </mesh>
+        {/* Machine Indicator Light */}
+        <mesh position={[0.18, 0.38, 0.21]}>
+          <sphereGeometry args={[0.02, 8, 8]} />
+          <meshBasicMaterial color="#10b981" />
+        </mesh>
+        {/* Coffee Mug */}
+        <mesh position={[-0.08, 0.12, 0.22]}>
+          <cylinderGeometry args={[0.04, 0.035, 0.08, 12]} />
+          <meshStandardMaterial color="#fafaf9" />
+        </mesh>
+      </group>
+
+      {/* Water Cooler Dispenser */}
+      <group position={[0.65, 0.95, 0]}>
+        <mesh position={[0, 0.3, 0]} castShadow>
+          <boxGeometry args={[0.3, 0.55, 0.3]} />
+          <meshStandardMaterial color="#dfe2ee" />
+        </mesh>
+        <mesh position={[0, 0.65, 0]}>
+          <cylinderGeometry args={[0.12, 0.12, 0.32, 16]} />
+          <meshPhysicalMaterial color="#38bdf8" transmission={0.7} transparent opacity={0.5} />
+        </mesh>
+      </group>
+      {/* Overhead Pantry Minimalist Pendant Light (Physical Light Source) */}
+      <group position={[0, 2.8, 0]}>
+        <mesh position={[0, 0.45, 0]}>
+          <cylinderGeometry args={[0.004, 0.004, 0.9, 8]} />
+          <meshBasicMaterial color="#94a3b8" />
+        </mesh>
+        <mesh position={[0, 0, 0]} castShadow>
+          <coneGeometry args={[0.22, 0.28, 20]} />
+          <meshStandardMaterial color="#1e293b" metalness={0.7} />
+        </mesh>
+        <mesh position={[0, -0.1, 0]}>
+          <sphereGeometry args={[0.06, 12, 12]} />
+          <meshStandardMaterial color="#fef3c7" emissive="#f59e0b" emissiveIntensity={2.0} />
+        </mesh>
+        <spotLight
+          position={[0, -0.12, 0]}
+          target-position={[0, -1.6, 0]}
+          intensity={1.8}
+          distance={4.5}
+          angle={Math.PI / 3}
+          penumbra={0.5}
+          color="#fef3c7"
+        />
+      </group>
+    </group>
+  );
+};
+
+// 7. Round Nordic Birch Meeting Table with Pendant Lamp (East Corner)
+const RoundMeetingTable: React.FC<{ position: [number, number, number] }> = ({ position }) => {
+  return (
+    <group position={position}>
+      {/* Round Nordic Birch Tabletop */}
+      <mesh position={[0, 0.74, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[1.3, 1.3, 0.06, 32]} />
+        <meshStandardMaterial color="#cfb188" roughness={0.3} />
+      </mesh>
+      {/* Central Cable Disc */}
+      <mesh position={[0, 0.775, 0]}>
+        <cylinderGeometry args={[0.18, 0.18, 0.01, 24]} />
+        <meshStandardMaterial color="#2b2014" />
+      </mesh>
+      {/* Center Fluted Pedestal Base */}
+      <mesh position={[0, 0.36, 0]} castShadow receiveShadow>
+        <cylinderGeometry args={[0.22, 0.38, 0.72, 24]} />
+        <meshStandardMaterial color="#9c7952" roughness={0.5} />
+      </mesh>
+
+
+      {/* Hanging Low Minimalist Cone Pendant Light (Physical Light Source) */}
+      <group position={[0, 3.2, 0]}>
+        <mesh position={[0, -0.8, 0]}>
+          <cylinderGeometry args={[0.008, 0.008, 1.6, 8]} />
+          <meshBasicMaterial color="#869397" />
+        </mesh>
+        <mesh position={[0, -1.6, 0]} rotation={[0, 0, 0]} castShadow>
+          <coneGeometry args={[0.3, 0.38, 24]} />
+          <meshStandardMaterial color="#1e293b" metalness={0.7} roughness={0.3} />
+        </mesh>
+        {/* Glowing Bulb inside fixture */}
+        <mesh position={[0, -1.72, 0]}>
+          <sphereGeometry args={[0.08, 16, 16]} />
+          <meshStandardMaterial color="#fffbeb" emissive="#fef3c7" emissiveIntensity={2.2} />
+        </mesh>
+        {/* Warm Spotlight on table */}
+        <spotLight
+          position={[0, -1.74, 0]}
+          target-position={[0, 0, 0]}
+          intensity={2.4}
+          distance={5.5}
+          angle={Math.PI / 3.5}
+          penumbra={0.4}
+          color="#fef3c7"
+        />
+      </group>
+    </group>
+  );
+};
 
 export const OfficeCanvas: React.FC = () => {
   const agents = useOfficeStore((state) => state.agents);
 
+  const isDraggingAgent = useOfficeStore((state) => state.isDraggingAgent);
+  const controlsRef = React.useRef<any>(null);
+
+  // Free Roam Zoom In/Out helper
+  const handleZoom = (factor: number) => {
+    if (controlsRef.current) {
+      const controls = controlsRef.current;
+      const camera = controls.object;
+      if (camera) {
+        camera.position.x *= factor;
+        camera.position.y *= factor;
+        camera.position.z *= factor;
+        controls.update();
+      }
+    }
+  };
+
+  // Reset Camera to standard isometric angle
+  const handleResetCamera = () => {
+    if (controlsRef.current) {
+      const controls = controlsRef.current;
+      controls.target.set(0, 0.6, 0);
+      controls.object.position.set(10, 13, 14);
+      controls.update();
+    }
+  };
+
   return (
-    <div className="w-full h-full relative bg-[#090d16]">
+    <div className="w-full h-full relative bg-[#070a10] overflow-hidden select-none">
+      {/* Stitch Top Center Floating HUD Controls */}
+      <div className="absolute top-3.5 left-1/2 -translate-x-1/2 z-20 flex items-center gap-3 bg-[#0a0e16]/85 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10 shadow-2xl">
+        <div className="flex items-center gap-2 pr-2.5 border-r border-white/10">
+          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse shadow-[0_0_8px_#22d3ee]" />
+          <span className="text-[11px] font-mono font-bold tracking-wider text-gray-200">
+            SCANDINAVIAN OPEN AI STUDIO
+          </span>
+          <span className="text-[9px] font-mono text-gray-400 bg-white/5 px-2 py-0.5 rounded border border-white/5 uppercase">
+            DRAG OR COMMAND AGENTS
+          </span>
+        </div>
+
+        {/* Free Roam Zoom & Reset Toolbar */}
+        <div className="flex items-center gap-1 font-mono">
+          <button
+            onClick={() => handleZoom(1.2)}
+            className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white text-xs flex items-center justify-center border border-white/5 transition-colors active:scale-95"
+            title="Zoom Out"
+          >
+            -
+          </button>
+          <button
+            onClick={() => handleZoom(0.8)}
+            className="w-6 h-6 rounded bg-white/5 hover:bg-white/10 text-gray-300 hover:text-white text-xs flex items-center justify-center border border-white/5 transition-colors active:scale-95"
+            title="Zoom In"
+          >
+            +
+          </button>
+          <button
+            onClick={handleResetCamera}
+            className="px-2 h-6 rounded bg-white/5 hover:bg-cyan-500/20 text-gray-300 hover:text-cyan-300 text-[10px] tracking-wider font-semibold border border-white/5 hover:border-cyan-500/30 transition-colors uppercase active:scale-95"
+            title="Reset View"
+          >
+            RESET
+          </button>
+        </div>
+      </div>
+
       <Canvas
         shadows
-        camera={{ position: [11, 13, 14], fov: 32 }}
-        className="w-full h-full"
+        camera={{ position: [10, 13, 14], fov: 32 }}
+        className="w-full h-full cursor-grab active:cursor-grabbing"
       >
-        {/* Warm Ambient Fill Lighting */}
-        <ambientLight intensity={1.1} color="#f8fafc" />
+        {/* Warm Sunlight & Stellar Radiance Illumination */}
+        <ambientLight intensity={0.9} color="#fff8ed" />
 
-        {/* Angled Directional Sunlight streaming from window */}
+        {/* Primary Radiant Sunlight / Star Light from East Window Wall */}
         <directionalLight
-          position={[-14, 18, 8]}
-          intensity={2.2}
-          color="#fffbeb"
+          position={[12, 16, 7]}
+          intensity={3.4}
+          color="#fff5db"
           castShadow
           shadow-mapSize-width={2048}
           shadow-mapSize-height={2048}
-          shadow-camera-far={45}
-          shadow-camera-left={-12}
-          shadow-camera-right={12}
-          shadow-camera-top={12}
-          shadow-camera-bottom={-12}
-          shadow-bias={-0.0001}
+          shadow-camera-far={40}
+          shadow-camera-near={0.5}
+          shadow-camera-left={-10}
+          shadow-camera-right={10}
+          shadow-camera-top={10}
+          shadow-camera-bottom={-10}
+          shadow-bias={-0.0002}
+          shadow-normalBias={0.02}
         />
 
-        {/* Soft Ceiling Downlight Fill */}
-        <pointLight position={[0, 8, 0]} intensity={0.8} color="#fef08a" distance={20} />
+        {/* Overhead Atrium Studio Downlight */}
+        <pointLight position={[0, 8.5, 0]} intensity={1.6} color="#fffbeb" distance={22} />
+
+        {/* Studio Warm Rim Highlights */}
+        <pointLight position={[-4.8, 4.5, 3.4]} intensity={1.1} color="#67e8f9" distance={12} />
+        <pointLight position={[4.8, 4.0, 3.4]} intensity={1.3} color="#fde68a" distance={12} />
 
         <Suspense fallback={null}>
-          {/* Flooring & Rugs */}
+          <OfficeLife />
+          {/* 1. Oak Parquet Floor */}
           <ParquetFloor />
 
-          {/* Architectural Walls */}
-          <AcousticWoodWall position={[0, 0, -8.0]} />
-          <PanoramicWindowWall position={[-8.5, 0, 0]} />
+          {/* 2. Walls */}
+          <NorthWall position={[0, 0, -8.0]} />
+          <WestWall position={[-8.4, 0, 0]} />
+          <EastWindowWall position={[8.4, 0, 0]} />
 
-          {/* 4 Modern Workstations with Dual Monitors */}
-          <ModernWorkstation
-            position={[0, 0, -2.5]}
-            deskColor="#f8fafc"
-            nameTag="David (Manager)"
-          />
-          <ModernWorkstation
-            position={[-3.8, 0, -1.0]}
-            deskColor="#fef08a"
-            nameTag="Elena (Researcher)"
-          />
-          <ModernWorkstation
-            position={[3.8, 0, -1.0]}
-            deskColor="#f8fafc"
-            nameTag="Alex (Developer)"
-          />
-          <ModernWorkstation
-            position={[3.8, 0, 1.8]}
-            deskColor="#f8fafc"
-            nameTag="Maya (QA Auditor)"
+          {/* 3. Center Dual Workstation Pods */}
+          {/* North Pod: David & Elena */}
+          <DualBenchPod
+            position={[0, 0, -1.8]}
+            podLabel="NORTH BENCH // DAVID & ELENA"
+            leftAgent={{ name: 'David', color: '#e3c198', monitorType: 'ultrawide' }}
+            rightAgent={{ name: 'Elena', color: '#d0bcff', monitorType: 'dual' }}
           />
 
-          {/* Whiteboard & Presentation Zone */}
-          <ArchitecturalWhiteboard position={[0, 0, -7.0]} />
+          {/* South Pod: Alex & Maya */}
+          <DualBenchPod
+            position={[0, 0, 1.8]}
+            podLabel="SOUTH BENCH // ALEX & MAYA"
+            leftAgent={{ name: 'Alex', color: '#4cd7f6', monitorType: 'ultrawide' }}
+            rightAgent={{ name: 'Maya', color: '#10b981', monitorType: 'dual' }}
+          />
 
-          {/* Coffee Bar & Designer Lounge */}
-          <DesignerLounge position={[-4.5, 0, 3.8]} />
+          {/* 4. Pantry & Espresso Bar (West Corner) */}
+          <EspressoPantry position={[-4.8, 0, 3.4]} />
 
-          {/* Greenery / Indoor Plants */}
-          <PottedFiddleLeafFig position={[-7.2, 0, -6.5]} />
-          <PottedFiddleLeafFig position={[7.0, 0, -6.8]} />
-          <PottedFiddleLeafFig position={[-7.2, 0, 6.5]} />
-          <PottedFiddleLeafFig position={[7.0, 0, 6.5]} />
+          {/* 5. Round Meeting Table (East Corner) */}
+          <RoundMeetingTable position={[4.8, 0, 3.4]} />
 
-          {/* Render Active Autonomous Agents */}
+          {/* 6. Active Autonomous Characters */}
           {Object.values(agents).map((agent) => (
             <AgentCharacter key={agent.id} agent={agent} />
           ))}
@@ -514,22 +775,28 @@ export const OfficeCanvas: React.FC = () => {
           {/* Soft Ground Contact Shadows */}
           <ContactShadows
             position={[0, 0, 0]}
-            opacity={0.65}
-            scale={18}
+            opacity={0.7}
+            scale={20}
             blur={1.8}
             far={10}
             resolution={1024}
-            color="#090d16"
+            color="#070a10"
           />
 
-          {/* Smooth Orbit Camera Rig */}
+          {/* 100% Free Roam Orbit Controls (Pan, Rotate, Zoom from any angle) */}
           <OrbitControls
+            ref={controlsRef}
+            enabled={!isDraggingAgent}
             enableDamping
-            dampingFactor={0.05}
-            maxPolarAngle={Math.PI / 2.2}
-            minDistance={8}
-            maxDistance={28}
-            target={[0, 0.8, 0]}
+            dampingFactor={0.06}
+            rotateSpeed={0.8}
+            panSpeed={0.8}
+            zoomSpeed={0.9}
+            maxPolarAngle={Math.PI / 2.05}
+            minDistance={4}
+            maxDistance={40}
+            target={[0, 0.6, 0]}
+            makeDefault
           />
         </Suspense>
       </Canvas>

@@ -6,6 +6,17 @@ export const TerminalDock: React.FC = () => {
   const [isExpanded, setIsExpanded] = useState(false);
   const terminalLogs = useOfficeStore((state) => state.terminalLogs);
   const clearTerminalLogs = useOfficeStore((state) => state.clearTerminalLogs);
+  const logsEndRef = React.useRef<HTMLDivElement>(null);
+
+  // Auto-expand dock when logs arrive
+  React.useEffect(() => {
+    if (terminalLogs.length > 0) {
+      setIsExpanded(true);
+      setTimeout(() => {
+        logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }, 50);
+    }
+  }, [terminalLogs.length]);
 
   return (
     <div
@@ -67,6 +78,7 @@ export const TerminalDock: React.FC = () => {
               </div>
             ))
           )}
+          <div ref={logsEndRef} />
         </div>
       )}
     </div>

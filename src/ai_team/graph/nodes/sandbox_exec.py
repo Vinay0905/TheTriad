@@ -77,6 +77,14 @@ def sandbox_execution_node(state: TriadCouncilState) -> Dict[str, Any]:
             last_exit = 126
             break
 
+        # Interactive / Hooked command permission check if registered
+        if cmd_prompter and not cmd_prompter(cmd):
+            denial_msg = f"Command execution denied by operator: {cmd}"
+            print(f"  [Sandbox Gate] {denial_msg}")
+            combined_stderr.append(denial_msg)
+            last_exit = 130
+            break
+
         executed_commands.append(cmd)
         try:
             proc = subprocess.run(
@@ -93,14 +101,12 @@ def sandbox_execution_node(state: TriadCouncilState) -> Dict[str, Any]:
 
             # Stream logs to 3D Office HUD
             try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    if proc.stdout:
-                        asyncio.create_task(bus.broadcast(TerminalLogEvent(stream="stdout", chunk=proc.stdout)))
-                    if proc.stderr:
-                        asyncio.create_task(bus.broadcast(TerminalLogEvent(stream="stderr", chunk=proc.stderr)))
-            except Exception:
-                pass
+                if proc.stdout:
+                    bus.dispatch(TerminalLogEvent(stream="stdout", chunk=proc.stdout))
+                if proc.stderr:
+                    bus.dispatch(TerminalLogEvent(stream="stderr", chunk=proc.stderr))
+            except Exception as dispatch_err:
+                print(f"  [Sandbox Log Dispatch Warning] {dispatch_err}")
 
             if proc.returncode != 0:
                 break

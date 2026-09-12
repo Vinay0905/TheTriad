@@ -23,6 +23,11 @@ class AppConfig:
     groq_api_key: str = field(
         default_factory=lambda: os.getenv("GROQ_API_KEY", "")
     )
+    groq_researcher_api_key: str = field(
+        default_factory=lambda: os.getenv(
+            "GROQ_RESEARCHER_API_KEY", os.getenv("GROQ_API_KEY", "")
+        )
+    )
     # ZhipuAI GLM-4-Flash Keys (Free tier)
     zhipuai_dev_api_key: str = field(
         default_factory=lambda: os.getenv(
@@ -44,6 +49,11 @@ class AppConfig:
     gemini_researcher_model: str = field(
         default_factory=lambda: os.getenv(
             "GEMINI_RESEARCHER_MODEL", "gemini-2.5-flash"
+        )
+    )
+    groq_researcher_model: str = field(
+        default_factory=lambda: os.getenv(
+            "GROQ_RESEARCHER_MODEL", "openai/gpt-oss-120b"
         )
     )
     groq_model: str = field(

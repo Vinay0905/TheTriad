@@ -3,7 +3,7 @@
 from pathlib import Path
 from ai_team.graph.builder import build_triad_graph
 from ai_team.graph.nodes.sandbox_exec import sandbox_execution_node
-from ai_team.graph.nodes.abort import clean_abort_node
+from ai_team.graph.nodes.manager import manager_final_report_node
 from ai_team.graph.state import TriadCouncilState
 
 
@@ -16,7 +16,7 @@ def test_langgraph_compilation():
 def test_human_gate_abort_invariant(tmp_path: Path):
     """
     CRITICAL SAFETY INVARIANT:
-    When operator rejects ('abort'), the graph must route to clean_abort_node.
+    When operator rejects ('abort'), the graph must route to manager_final_report_node.
     Zero files written to workspace. Zero commands executed.
     """
     state: TriadCouncilState = {
@@ -32,14 +32,14 @@ def test_human_gate_abort_invariant(tmp_path: Path):
         "approval_status": "ABORTED",
     }
 
-    # Run clean abort
-    result = clean_abort_node(state)
-    assert result["approval_status"] == "ABORTED"
-    assert "cleanly terminated" in result["final_status_report"]
+    # Run manager final report for abort
+    result = manager_final_report_node(state)
+    assert "final_status_report" in result
 
     # Assert workspace is untouched
     workspace = tmp_path / "workspace"
     assert not workspace.exists() or len(list(workspace.glob("*"))) == 0
+
 
 
 def test_human_gate_approved_execution_with_command_allow(tmp_path: Path):

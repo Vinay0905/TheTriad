@@ -1,20 +1,78 @@
 import React, { useState } from 'react';
 import { useOfficeStore } from '../../store/useOfficeStore';
-import { X, Send, Cpu, MapPin, Activity } from 'lucide-react';
+import {
+  X,
+  Send,
+  Minimize2,
+  Maximize2,
+  Gavel,
+  MessageSquare,
+} from 'lucide-react';
 
 export const AgentDossier: React.FC = () => {
   const selectedAgentId = useOfficeStore((state) => state.selectedAgentId);
-  const setSelectedAgent = useOfficeStore((state) => state.setSelectedAgent);
+  const isRightPanelOpen = useOfficeStore((state) => state.isRightPanelOpen);
+  const isRightPanelMinimized = useOfficeStore((state) => state.isRightPanelMinimized);
+  const setRightPanelMinimized = useOfficeStore((state) => state.setRightPanelMinimized);
+  const toggleRightPanel = useOfficeStore((state) => state.toggleRightPanel);
+  const openGate = useOfficeStore((state) => state.openGate);
+
   const agent = useOfficeStore((state) =>
     selectedAgentId ? state.agents[selectedAgentId] : null
   );
 
   const [chatInput, setChatInput] = useState('');
-  const [messages, setMessages] = useState<
-    { sender: 'user' | 'agent'; text: string }[]
-  >([]);
+  const [messages, setMessages] = useState<{ sender: 'user' | 'agent'; text: string }[]>([
+    {
+      sender: 'agent',
+      text: 'Ring buffer lock-free validation passed with 1.84M ops/sec on Tokio cluster.',
+    },
+  ]);
 
-  if (!agent) return null;
+  if (!isRightPanelOpen || !agent) return null;
+
+  // Minimized state: Sleek floating badge docked at bottom-right
+  if (isRightPanelMinimized) {
+    return (
+      <div className="absolute right-4 bottom-14 z-30 bg-surface-container-lowest/95 border border-surface-variant/40 p-2.5 rounded-xl shadow-2xl flex items-center gap-3 backdrop-blur-xl animate-in fade-in">
+        <div
+          className="w-8 h-8 rounded-lg flex items-center justify-center font-headline font-bold text-xs"
+          style={{
+            backgroundColor: `${agent.color}25`,
+            borderColor: agent.color,
+            color: agent.color,
+          }}
+        >
+          {agent.name.charAt(0)}
+        </div>
+        <div className="flex flex-col">
+          <div className="flex items-center gap-1.5">
+            <span className="font-headline text-xs font-bold text-on-surface">{agent.name}</span>
+            <span className="font-mono text-[9px] text-primary">{agent.nodeId}</span>
+          </div>
+          <span className="text-[10px] font-mono text-on-surface-variant truncate max-w-[140px]">
+            {agent.speed || '78.4 tok/s'} · {agent.cost || '$3.42'}
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setRightPanelMinimized(false)}
+            className="p-1 text-on-surface-variant hover:text-on-surface rounded hover:bg-surface-container transition-colors"
+            title="Maximize Dossier"
+          >
+            <Maximize2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={toggleRightPanel}
+            className="p-1 text-on-surface-variant hover:text-red-400 rounded hover:bg-surface-container transition-colors"
+            title="Close Panel"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   const handleSendMessage = (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,121 +82,174 @@ export const AgentDossier: React.FC = () => {
     setMessages((prev) => [...prev, { sender: 'user', text: userText }]);
     setChatInput('');
 
-    // Simulated contextual response from agent's perspective
     setTimeout(() => {
       let reply = '';
       if (agent.id === 'manager') {
-        reply = `I am currently coordinating the team's RFC and will ensure acceptance criteria are locked before Alex writes code.`;
+        reply = `Sprint burn target is < 150k tok/hr. Partitioning active subgraphs with RFC lock.`;
       } else if (agent.id === 'researcher') {
-        reply = `I am auditing documentation via Google Search to ensure we don't use deprecated APIs.`;
+        reply = `Validated lock-free formal proof for crossbeam ring buffer against Linux kernel docs.`;
       } else if (agent.id === 'developer') {
-        reply = `I'm adhering strictly to the TDD test harness. Concurrency and clean standard-library interfaces are my top priority.`;
+        reply = `Cargo test --package triad-storage passes all unit tests without mutex lock contention.`;
       } else {
-        reply = `I'm scrutinizing edge cases with GLM-4.7-Flash. No code touches the sandbox until I verify boundary stability.`;
+        reply = `Fuzz engine 100k gRPC payloads: 0 memory leaks, 0 data races detected.`;
       }
       setMessages((prev) => [...prev, { sender: 'agent', text: reply }]);
-    }, 600);
+    }, 450);
   };
 
   return (
-    <div className="w-84 bg-surface/95 backdrop-blur border-l border-border h-full flex flex-col z-20 shadow-2xl animate-in slide-in-from-right duration-200">
+    <aside className="w-80 bg-surface-container-lowest/95 backdrop-blur-xl border-l border-surface-variant/30 flex flex-col justify-between shrink-0 z-20 transition-all duration-300 shadow-2xl">
       {/* Dossier Header */}
-      <div className="p-4 border-b border-border flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="text-2xl p-2 rounded-lg bg-background border border-border">
-            {agent.avatarIcon}
+      <div className="p-3.5 border-b border-surface-variant/30 flex items-center justify-between">
+        <div className="flex items-center gap-2.5">
+          <div
+            className="w-8 h-8 rounded-lg flex items-center justify-center font-headline font-bold text-xs shadow-md shrink-0"
+            style={{
+              backgroundColor: agent.color,
+              color: '#0a0e16',
+            }}
+          >
+            {agent.name.charAt(0)}
           </div>
-          <div>
-            <h2 className="font-bold text-white text-base leading-tight">
-              {agent.name}
-            </h2>
-            <p className="text-xs text-gray-400">{agent.role}</p>
+          <div className="flex flex-col">
+            <div className="flex items-center gap-1.5">
+              <span className="font-headline text-xs font-bold text-on-surface">
+                {agent.name}
+              </span>
+              <span
+                className="px-1.5 py-0.2 rounded font-mono text-[9px] font-bold"
+                style={{
+                  backgroundColor: `${agent.color}25`,
+                  color: agent.color,
+                }}
+              >
+                {agent.nodeId}
+              </span>
+            </div>
+            <span
+              className="font-mono text-[9.5px] uppercase tracking-wide truncate max-w-[160px]"
+              style={{ color: agent.color }}
+            >
+              {agent.role}
+            </span>
           </div>
         </div>
-        <button
-          onClick={() => setSelectedAgent(null)}
-          className="p-1 rounded-md text-gray-400 hover:text-white hover:bg-surfaceHover transition-colors"
-        >
-          <X className="w-5 h-5" />
-        </button>
+
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setRightPanelMinimized(true)}
+            className="p-1 rounded bg-surface-container hover:bg-surface-bright text-on-surface-variant hover:text-on-surface transition-colors"
+            title="Minimize to Floating Pill"
+          >
+            <Minimize2 className="w-3.5 h-3.5" />
+          </button>
+          <button
+            onClick={toggleRightPanel}
+            className="p-1 rounded bg-surface-container hover:bg-surface-bright text-on-surface-variant hover:text-on-surface transition-colors"
+            title="Close Dossier"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
-      {/* Meta Specs */}
-      <div className="p-4 space-y-3 border-b border-border text-xs">
-        <div className="flex items-center gap-2 text-gray-300">
-          <Cpu className="w-4 h-4 text-blue-400 shrink-0" />
-          <span className="text-gray-400">Model:</span>
-          <span className="font-mono text-white truncate">{agent.model}</span>
+      {/* Telemetry Vitals Grid (2x2 from Stitch) */}
+      <div className="flex-1 overflow-y-auto p-3 flex flex-col gap-3">
+        <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+          <div className="p-2 rounded bg-surface-container border border-surface-variant/30">
+            <span className="text-[9px] text-on-surface-variant uppercase">Model Engine</span>
+            <div className="font-bold text-on-surface mt-0.5 truncate">{agent.model}</div>
+          </div>
+          <div className="p-2 rounded bg-surface-container border border-surface-variant/30">
+            <span className="text-[9px] text-on-surface-variant uppercase">Context Budget</span>
+            <div className="font-bold text-secondary mt-0.5 truncate">
+              {agent.contextBudget || '142,890 / 200k'}
+            </div>
+          </div>
+          <div className="p-2 rounded bg-surface-container border border-surface-variant/30">
+            <span className="text-[9px] text-on-surface-variant uppercase">Current Cost</span>
+            <div className="font-bold text-on-surface mt-0.5 truncate">
+              {agent.cost || '$3.42'}
+            </div>
+          </div>
+          <div className="p-2 rounded bg-surface-container border border-surface-variant/30">
+            <span className="text-[9px] text-on-surface-variant uppercase">Inference Speed</span>
+            <div className="font-bold text-primary mt-0.5 truncate">
+              {agent.speed || '78.4 tok/s'}
+            </div>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2 text-gray-300">
-          <MapPin className="w-4 h-4 text-emerald-400 shrink-0" />
-          <span className="text-gray-400">Location:</span>
-          <span className="font-mono text-white">{agent.currentWaypoint}</span>
-        </div>
-
-        <div className="flex items-center gap-2 text-gray-300">
-          <Activity className="w-4 h-4 text-amber-400 shrink-0" />
-          <span className="text-gray-400">Activity:</span>
-          <span className="font-semibold text-white uppercase tracking-wider">
-            {agent.animation}
+        {/* Active Directive Card */}
+        <div className="p-2.5 rounded-lg bg-surface-container/70 border border-surface-variant/40 flex flex-col gap-1">
+          <span className="font-mono text-[10px] text-primary uppercase font-bold">
+            Active Directive:
           </span>
-        </div>
-      </div>
-
-      {/* Live Status Card */}
-      <div className="p-4 border-b border-border">
-        <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-          Current Live Task
-        </div>
-        <div className="bg-background/80 border border-border p-3 rounded-lg text-xs font-mono text-gray-200 leading-relaxed">
-          {agent.statusBadge || 'Idle, awaiting instructions.'}
-        </div>
-      </div>
-
-      {/* Direct Inter-Employee Chat */}
-      <div className="flex-1 flex flex-col p-4 min-h-0">
-        <div className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-2">
-          Direct Employee Query
+          <p className="font-mono text-[10.5px] text-on-surface-variant leading-relaxed">
+            "{agent.directive || 'Zero-copy concurrency rules. Prioritize lock-free ring buffer algorithms.'}"
+          </p>
         </div>
 
-        <div className="flex-1 overflow-y-auto space-y-2 mb-3 pr-1 text-xs">
-          {messages.length === 0 ? (
-            <p className="text-gray-500 italic text-center mt-6">
-              Ask {agent.name} directly about their active architecture or design choices.
-            </p>
-          ) : (
-            messages.map((m, idx) => (
+        {/* Live Node Interrogation Console */}
+        <div className="flex-1 flex flex-col gap-1.5 min-h-[140px]">
+          <span className="font-mono text-[10px] text-on-surface-variant uppercase font-semibold flex items-center gap-1">
+            <MessageSquare className="w-3 h-3 text-primary" /> Interrogate Node State:
+          </span>
+          <div className="flex-1 overflow-y-auto p-2.5 rounded bg-surface-container-lowest border border-surface-variant/40 flex flex-col gap-2 font-mono text-[10.5px] max-h-40">
+            {messages.map((m, idx) => (
               <div
                 key={idx}
-                className={`p-2.5 rounded-lg max-w-[85%] ${
+                className={`p-1.5 rounded ${
                   m.sender === 'user'
-                    ? 'ml-auto bg-blue-600/90 text-white'
-                    : 'bg-surfaceHover border border-border text-gray-200'
+                    ? 'ml-auto bg-primary/20 text-primary border border-primary/30 max-w-[85%]'
+                    : 'bg-surface-container text-on-surface border border-surface-variant/30'
                 }`}
               >
+                <span className="font-bold text-[9px] uppercase tracking-wider block mb-0.5" style={{ color: m.sender === 'agent' ? agent.color : '#4cd7f6' }}>
+                  {m.sender === 'user' ? 'Lead Architect' : agent.name}:
+                </span>
                 {m.text}
               </div>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
 
-        <form onSubmit={handleSendMessage} className="flex gap-2">
-          <input
-            type="text"
-            placeholder={`Ask ${agent.name}...`}
-            value={chatInput}
-            onChange={(e) => setChatInput(e.target.value)}
-            className="flex-1 bg-background border border-border rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-blue-500"
-          />
-          <button
-            type="submit"
-            className="bg-blue-600 hover:bg-blue-500 text-white p-2 rounded-lg transition-colors"
-          >
-            <Send className="w-4 h-4" />
-          </button>
-        </form>
+          <form onSubmit={handleSendMessage} className="flex gap-1.5 mt-1">
+            <input
+              type="text"
+              placeholder={`Steer or query ${agent.name}...`}
+              value={chatInput}
+              onChange={(e) => setChatInput(e.target.value)}
+              className="flex-1 bg-surface-container px-2.5 py-1.5 rounded text-xs font-mono text-on-surface border border-surface-variant/40 focus:outline-none focus:ring-1 focus:ring-primary"
+            />
+            <button
+              type="submit"
+              className="px-3 py-1.5 rounded bg-primary text-on-primary font-headline font-bold text-xs flex items-center justify-center hover:bg-primary-container transition-colors"
+            >
+              <Send className="w-3.5 h-3.5" />
+            </button>
+          </form>
+        </div>
       </div>
-    </div>
+
+      {/* Review Gate Action Button */}
+      <div className="p-3 border-t border-surface-variant/30">
+        <button
+          onClick={() =>
+            openGate(
+              'manual-gate',
+              'Active Objective Review & Approval',
+              '// Validated in-memory cache architecture\npub struct LruCache { shards: Arc<crossbeam::ShardedRing<K, V>> }',
+              'Audited by Maya: 48 passed unit tests, 0 race conditions, 0 memory leaks.',
+              'Acceptance criteria confirmed by team. Ready for human verification.'
+            )
+          }
+          className="w-full py-2 bg-primary/20 hover:bg-primary/30 text-primary border border-primary/40 rounded-lg font-headline text-xs font-bold transition-all flex items-center justify-center gap-1.5 shadow-[0_0_12px_rgba(76,215,246,0.15)]"
+        >
+          <Gavel className="w-4 h-4" />
+          <span>Open Human Steering Gate</span>
+        </button>
+      </div>
+    </aside>
   );
 };
+

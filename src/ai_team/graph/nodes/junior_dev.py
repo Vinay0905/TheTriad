@@ -3,6 +3,7 @@
 import os
 from typing import Dict, Any
 from ai_team.graph.state import TriadCouncilState
+from ai_team.utils import extract_python_code, repair_truncated_python_code, validate_python_syntax
 
 
 def junior_draft_node(state: TriadCouncilState) -> Dict[str, Any]:
@@ -32,8 +33,8 @@ def junior_draft_node(state: TriadCouncilState) -> Dict[str, Any]:
                 model_name=groq_model_name,
                 groq_api_key=groq_key,
                 temperature=0.3,
-                max_tokens=600,
-                request_timeout=20,
+                max_tokens=1500,
+                request_timeout=25,
             )
             prompt_a = (
                 f"You are Junior Developer 1. Write the Python implementation for `main.py` to accomplish this task:\n"
@@ -45,7 +46,8 @@ def junior_draft_node(state: TriadCouncilState) -> Dict[str, Any]:
             )
             resp_a = llm_groq.invoke(prompt_a)
             clean_a = extract_python_code(resp_a.content)
-            if clean_a:
+            clean_a = repair_truncated_python_code(clean_a)
+            if clean_a and validate_python_syntax(clean_a)[0]:
                 cand_a_code = clean_a
         except Exception as err:
             print(f"  [Junior Dev 1 Notice] Groq notice: {err}")
@@ -61,8 +63,8 @@ def junior_draft_node(state: TriadCouncilState) -> Dict[str, Any]:
                 base_url="https://open.bigmodel.cn/api/paas/v4",
                 api_key=glm_key,
                 temperature=0.3,
-                max_tokens=600,
-                request_timeout=15,
+                max_tokens=1500,
+                request_timeout=25,
             )
             prompt_b = (
                 f"You are Junior Developer 2. Write the Python implementation for `main.py` to accomplish this task:\n"
@@ -70,11 +72,13 @@ def junior_draft_node(state: TriadCouncilState) -> Dict[str, Any]:
                 f"Unit Test Suite Contract that your code MUST satisfy:\n"
                 f"{test_code}\n\n"
                 "Focus on strict defensive type checking, robust exception safety, and edge-case handling.\n"
+                "CRITICAL: All code comments, docstrings, and identifier names MUST be strictly in English. Do NOT output Chinese characters.\n"
                 "Return ONLY executable Python code for `main.py`."
             )
             resp_b = llm_glm.invoke(prompt_b)
             clean_b = extract_python_code(resp_b.content)
-            if clean_b:
+            clean_b = repair_truncated_python_code(clean_b)
+            if clean_b and validate_python_syntax(clean_b)[0]:
                 cand_b_code = clean_b
                 candidate_b_generated = True
         except Exception as err:
@@ -90,8 +94,8 @@ def junior_draft_node(state: TriadCouncilState) -> Dict[str, Any]:
                 base_url="https://openrouter.ai/api/v1",
                 api_key=openrouter_key,
                 temperature=0.4,
-                max_tokens=600,
-                request_timeout=20,
+                max_tokens=1500,
+                request_timeout=25,
             )
             prompt_b = (
                 f"You are Junior Developer 2. Write an alternative, defensive Python implementation for `main.py` to accomplish:\n"
@@ -101,7 +105,8 @@ def junior_draft_node(state: TriadCouncilState) -> Dict[str, Any]:
             )
             resp_b = llm_fallback.invoke(prompt_b)
             clean_b = extract_python_code(resp_b.content)
-            if clean_b:
+            clean_b = repair_truncated_python_code(clean_b)
+            if clean_b and validate_python_syntax(clean_b)[0]:
                 cand_b_code = clean_b
         except Exception as err:
             print(f"  [Junior Dev 2 Notice] Secondary provider notice: {err}")

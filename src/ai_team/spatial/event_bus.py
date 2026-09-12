@@ -1,5 +1,6 @@
-"""Asynchronous Event Bus broadcasting spatial and state events to connected WebSockets."""
+"""Asynchronous & Thread-Safe Event Bus broadcasting spatial and state events to connected WebSockets."""
 
+import asyncio
 import json
 import sqlite3
 import time
@@ -15,6 +16,7 @@ class OfficeEventBus:
     def __init__(self, db_path: Optional[Path] = None):
         self.active_websockets: List[WebSocket] = []
         self.db_path = db_path or Path(".runs/events.db")
+        self.main_loop: Optional[asyncio.AbstractEventLoop] = None
         self._init_db()
 
     def _init_db(self):
@@ -31,6 +33,9 @@ class OfficeEventBus:
                 """
             )
 
+    def set_main_loop(self, loop: asyncio.AbstractEventLoop):
+        self.main_loop = loop
+
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_websockets.append(websocket)
@@ -38,6 +43,23 @@ class OfficeEventBus:
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_websockets:
             self.active_websockets.remove(websocket)
+
+    def dispatch(self, event: OfficeEvent):
+        """
+        Thread-safe synchronous dispatcher.
+        Can be called from ANY worker thread or LangGraph node without crashing.
+        """
+        if self.main_loop and self.main_loop.is_running():
+            asyncio.run_coroutine_threadsafe(self.broadcast(event), self.main_loop)
+        else:
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    loop.create_task(self.broadcast(event))
+                else:
+                    loop.run_until_complete(self.broadcast(event))
+            except Exception as e:
+                print(f"[EventBus Dispatch Warning] {e}")
 
     async def broadcast(self, event: OfficeEvent):
         """Persist to SQLite and broadcast JSON to all connected browser clients."""

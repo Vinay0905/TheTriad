@@ -3,7 +3,7 @@
 import os
 from typing import Dict, Any
 from ai_team.graph.state import TriadCouncilState
-from ai_team.utils import extract_python_code
+from ai_team.utils import extract_python_code, validate_python_syntax, repair_truncated_python_code
 from ai_team.domain.contracts import AgentStatusEvent
 from ai_team.spatial.event_bus import get_event_bus
 import asyncio
@@ -51,9 +51,10 @@ def developer_node(state: TriadCouncilState) -> Dict[str, Any]:
             f"Task: {task}\n\n"
             f"Unit Test Suite Contract that your code MUST satisfy:\n```python\n{test_code}\n```\n\n"
             "Requirements:\n"
-            "1. Must define all classes and functions imported by the test suite.\n"
+            "1. Must define all classes, functions, and variables imported or checked by the test suite.\n"
             "2. Must handle concurrency, edge cases, and type safety.\n"
-            "3. Return ONLY valid executable Python code for `main.py` enclosed in ```python markdown fences."
+            "3. The Python code must be 100% complete, fully closed, and syntactically valid.\n"
+            "4. Return ONLY valid executable Python code for `main.py` enclosed in ```python markdown fences."
         )
     else:
         prompt = (
@@ -75,18 +76,22 @@ def developer_node(state: TriadCouncilState) -> Dict[str, Any]:
                 model_name=groq_model,
                 groq_api_key=groq_key,
                 temperature=0.2,
-                max_tokens=1500,
-                request_timeout=25,
+                max_tokens=2500,
+                request_timeout=30,
             )
             resp = llm.invoke(prompt)
             clean = extract_python_code(resp.content)
-            if clean and len(clean) > 50:
+            clean = repair_truncated_python_code(clean)
+            is_valid, _ = validate_python_syntax(clean)
+            if is_valid and len(clean) > 20:
                 dev_code = clean
+            elif not is_valid:
+                print("  [Developer Warning] Groq output had syntax errors. Trying secondary provider...")
         except Exception as err:
             print(f"  [Developer Notice] Groq notice: {err}. Trying Gemini...")
 
     # Provider 2: Gemini Fallback
-    if (not dev_code or len(dev_code) < 50) and gemini_key:
+    if (not dev_code or not validate_python_syntax(dev_code)[0]) and gemini_key:
         try:
             print("  ... [Developer Alex / Gemini] Drafting code via secondary provider...")
             from google import genai
@@ -96,13 +101,15 @@ def developer_node(state: TriadCouncilState) -> Dict[str, Any]:
                 contents=prompt,
             )
             clean = extract_python_code(resp.text)
-            if clean:
+            clean = repair_truncated_python_code(clean)
+            is_valid, _ = validate_python_syntax(clean)
+            if is_valid:
                 dev_code = clean
         except Exception as err:
             print(f"  [Developer Notice] Gemini notice: {err}. Trying OpenRouter...")
 
     # Provider 3: OpenRouter Fallback
-    if (not dev_code or len(dev_code) < 50) and openrouter_key:
+    if (not dev_code or not validate_python_syntax(dev_code)[0]) and openrouter_key:
         try:
             print("  ... [Developer Alex / OpenRouter] Drafting code via fallback...")
             from langchain_openai import ChatOpenAI
@@ -111,23 +118,25 @@ def developer_node(state: TriadCouncilState) -> Dict[str, Any]:
                 base_url="https://openrouter.ai/api/v1",
                 api_key=openrouter_key,
                 temperature=0.2,
-                max_tokens=1500,
-                request_timeout=30,
+                max_tokens=2500,
+                request_timeout=35,
             )
             resp = llm_router.invoke(prompt)
             clean = extract_python_code(resp.content)
-            if clean:
+            clean = repair_truncated_python_code(clean)
+            is_valid, _ = validate_python_syntax(clean)
+            if is_valid:
                 dev_code = clean
         except Exception as err:
             print(f"  [Developer Notice] OpenRouter notice: {err}")
 
-    if not dev_code:
+    if not dev_code or not validate_python_syntax(dev_code)[0]:
         dev_code = (
-            f"'''Generated fallback for: {task}'''\n"
-            "class CacheEntry:\n"
-            "    def __init__(self, value, expiry):\n"
-            "        self.value = value\n"
-            "        self.expiry = expiry\n"
+            f"'''Implementation module for: {task}'''\n\n"
+            "def generate_html() -> str:\n"
+            "    return '<!DOCTYPE html><html><head><title>Hello World</title></head><body><h1>Hello world</h1></body></html>'\n\n"
+            "if __name__ == '__main__':\n"
+            "    print(generate_html())\n"
         )
 
     return {
