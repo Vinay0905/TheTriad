@@ -91,7 +91,6 @@ export class WaypointGraph {
     if (!this.waypoints[startId] || !this.waypoints[goalId]) return [];
     if (startId === goalId) return [this.waypoints[startId]];
 
-    const frontier: string[] = [startId];
     const cameFrom = new Map<string, string | null>();
     cameFrom.set(startId, null);
 

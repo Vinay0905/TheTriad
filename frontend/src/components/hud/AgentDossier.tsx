@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useOfficeStore } from '../../store/useOfficeStore';
-import { X, Send, Cpu, MapPin, Activity, Terminal } from 'lucide-react';
+import { X, Send, Cpu, MapPin, Activity } from 'lucide-react';
 
 export const AgentDossier: React.FC = () => {
   const selectedAgentId = useOfficeStore((state) => state.selectedAgentId);

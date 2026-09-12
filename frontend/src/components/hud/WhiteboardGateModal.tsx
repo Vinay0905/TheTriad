@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useOfficeStore } from '../../store/useOfficeStore';
-import { ShieldAlert, CheckCircle, XCircle, Compass, Terminal, FileCode } from 'lucide-react';
+import { ShieldAlert, CheckCircle, XCircle, Compass, FileCode } from 'lucide-react';
 
 export const WhiteboardGateModal: React.FC = () => {
   const gate = useOfficeStore((state) => state.gate);
