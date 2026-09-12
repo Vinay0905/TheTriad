@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useOfficeStore } from '../../store/useOfficeStore';
-import { Play, Loader2, Sparkles } from 'lucide-react';
+import { Play, Loader2, Sparkles, Download } from 'lucide-react';
 
 export const TopBar: React.FC = () => {
   const [inputTask, setInputTask] = useState('');
@@ -78,6 +78,17 @@ export const TopBar: React.FC = () => {
           <span className="font-mono text-[11px] text-on-surface-variant">GATE:</span>
           <span className="font-mono text-[11px] font-semibold text-secondary">ENFORCED</span>
         </div>
+
+        {/* Quick Download Latest Run ZIP */}
+        <a
+          href="/api/runs/download/latest"
+          download
+          className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 text-emerald-300 text-xs font-mono font-semibold transition-all hover:scale-105 active:scale-95"
+          title="Download latest generated project files (.ZIP)"
+        >
+          <Download className="w-3.5 h-3.5" />
+          <span>Export .ZIP</span>
+        </a>
 
         {/* Dynamic Panel Toggles */}
         <div className="flex items-center gap-1.5">

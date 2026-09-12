@@ -1,6 +1,6 @@
 import React, { Suspense } from 'react';
 import { Canvas } from '@react-three/fiber';
-import { OrbitControls, ContactShadows } from '@react-three/drei';
+import { OrbitControls, ContactShadows, Html } from '@react-three/drei';
 
 import { useOfficeStore } from '../../store/useOfficeStore';
 import { AgentCharacter } from './AgentCharacter';
@@ -19,21 +19,21 @@ import { OfficeLife } from './OfficeLife';
 //   North Wall: Wall-Mounted Glass Whiteboard with Colored Sticky Notes
 // ============================================================================
 
-// 1. Dark Herringbone Parquet Floor
+// 1. Light Scandinavian Nordic Bleached Oak / Architectural Sand Floor
 const ParquetFloor: React.FC = () => {
   return (
     <group position={[0, 0, 0]}>
-      {/* Warm Golden Oak Hardwood Floor Substrate */}
+      {/* Light Natural Nordic Bleached Oak Foundation */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[0, -0.01, 0]}>
         <planeGeometry args={[19, 19]} />
         <meshStandardMaterial
-          color="#211b19"
-          roughness={0.46}
-          metalness={0.06}
+          color="#ded5c4"
+          roughness={0.5}
+          metalness={0.04}
         />
       </mesh>
 
-      {/* Decorative Parquet Slat Lines Grid */}
+      {/* Decorative Subtle Slat / Tile Grid Joints */}
       {Array.from({ length: 19 }).map((_, i) => (
         <mesh
           key={i}
@@ -41,7 +41,7 @@ const ParquetFloor: React.FC = () => {
           position={[-9 + i * 1.0, 0.001, 0]}
         >
           <planeGeometry args={[0.02, 18.8]} />
-          <meshBasicMaterial color="#120f0e" opacity={0.58} transparent />
+          <meshBasicMaterial color="#b8ab96" opacity={0.35} transparent />
         </mesh>
       ))}
 
@@ -52,20 +52,20 @@ const ParquetFloor: React.FC = () => {
           position={[0, 0.001, -9 + j * 1.0]}
         >
           <planeGeometry args={[18.8, 0.02]} />
-          <meshBasicMaterial color="#120f0e" opacity={0.58} transparent />
+          <meshBasicMaterial color="#b8ab96" opacity={0.35} transparent />
         </mesh>
       ))}
 
       {/* Meeting Table Area Inset Ring */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[4.8, 0.003, 3.4]}>
         <ringGeometry args={[1.8, 1.84, 32]} />
-        <meshBasicMaterial color="#d7b889" opacity={0.14} transparent />
+        <meshBasicMaterial color="#9a7fcb" opacity={0.25} transparent />
       </mesh>
 
       {/* Coffee Bar Floor Glow Ring */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} receiveShadow position={[-4.8, 0.003, 3.4]}>
         <ringGeometry args={[1.7, 1.74, 32]} />
-        <meshBasicMaterial color="#4aaebe" opacity={0.12} transparent />
+        <meshBasicMaterial color="#0284c7" opacity={0.2} transparent />
       </mesh>
     </group>
   );
@@ -500,7 +500,80 @@ const DualBenchPod: React.FC<{
   );
 };
 
-// 6. Carrara Marble Espresso Pantry Lab (West Corner)
+// 6. Private BOSS Room (North-East Corner)
+const BossRoom: React.FC = () => {
+  return (
+    <group position={[5.6, 0, -5.55]}>
+      {/* A distinct, quieter material zone keeps this room legible from the main office. */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.012, 0]} receiveShadow>
+        <planeGeometry args={[4.65, 3.8]} />
+        <meshStandardMaterial color="#172526" roughness={0.86} />
+      </mesh>
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.018, 0]}>
+        <ringGeometry args={[0.72, 0.76, 32]} />
+        <meshBasicMaterial color="#d8b778" opacity={0.46} transparent />
+      </mesh>
+
+      {/* West glazed partition and a southern doorway: David visibly enters, rather than disappearing. */}
+      <mesh position={[-2.22, 2.0, 0]} castShadow>
+        <boxGeometry args={[0.08, 4.0, 3.7]} />
+        <meshStandardMaterial color="#263744" metalness={0.55} roughness={0.35} />
+      </mesh>
+      <mesh position={[-2.17, 2.0, 0]}>
+        <boxGeometry args={[0.018, 3.65, 3.25]} />
+        <meshPhysicalMaterial color="#8fb5c4" transmission={0.35} opacity={0.2} transparent roughness={0.16} />
+      </mesh>
+      <mesh position={[-1.2, 2.0, 1.82]} castShadow>
+        <boxGeometry args={[1.8, 4.0, 0.08]} />
+        <meshStandardMaterial color="#263744" metalness={0.45} roughness={0.42} />
+      </mesh>
+      <mesh position={[1.42, 2.0, 1.82]} castShadow>
+        <boxGeometry args={[1.25, 4.0, 0.08]} />
+        <meshStandardMaterial color="#263744" metalness={0.45} roughness={0.42} />
+      </mesh>
+
+      {/* Private desk, guest chair, and warm task light. */}
+      <mesh position={[0.55, 0.82, -0.62]} castShadow receiveShadow>
+        <boxGeometry args={[2.35, 0.10, 0.92]} />
+        <meshStandardMaterial color="#6a5034" roughness={0.4} />
+      </mesh>
+      <mesh position={[0.55, 0.42, -0.62]} castShadow>
+        <boxGeometry args={[0.08, 0.82, 0.82]} />
+        <meshStandardMaterial color="#17202a" metalness={0.7} roughness={0.28} />
+      </mesh>
+      <mesh position={[0.55, 1.18, -0.98]} castShadow>
+        <boxGeometry args={[0.96, 0.52, 0.05]} />
+        <meshStandardMaterial color="#090f17" roughness={0.28} />
+      </mesh>
+      <mesh position={[0.55, 1.18, -0.948]}>
+        <planeGeometry args={[0.90, 0.46]} />
+        <meshStandardMaterial color="#d8b778" emissive="#d8b778" emissiveIntensity={0.32} />
+      </mesh>
+      <mesh position={[-0.9, 0.35, 0.65]} castShadow>
+        <cylinderGeometry args={[0.27, 0.31, 0.7, 20]} />
+        <meshStandardMaterial color="#314657" roughness={0.62} />
+      </mesh>
+
+      {/* The label gives the user a clear private delivery destination. */}
+      <group position={[-1.95, 3.35, 1.87]}>
+        <mesh>
+          <boxGeometry args={[1.32, 0.42, 0.04]} />
+          <meshStandardMaterial color="#10191d" metalness={0.4} roughness={0.35} />
+        </mesh>
+        <mesh position={[0, 0, 0.025]}>
+          <planeGeometry args={[1.18, 0.26]} />
+          <meshBasicMaterial color="#d8b778" opacity={0.7} transparent />
+        </mesh>
+        <Html center transform distanceFactor={12} position={[0, 0, 0.06]} style={{ pointerEvents: 'none' }}>
+          <div className="font-mono text-[10px] font-bold tracking-[0.22em] text-[#d8b778] whitespace-nowrap">BOSS</div>
+        </Html>
+      </group>
+      <pointLight position={[-0.2, 3.2, 0.2]} intensity={1.05} color="#f6dfae" distance={5.5} />
+    </group>
+  );
+};
+
+// 7. Carrara Marble Espresso Pantry Lab (West Corner)
 const EspressoPantry: React.FC<{ position: [number, number, number] }> = ({ position }) => {
   return (
     <group position={position}>
@@ -751,6 +824,8 @@ export const OfficeCanvas: React.FC = () => {
             podLabel="NORTH BENCH // DAVID & ELENA"
             leftAgent={{ name: 'David', color: '#e3c198', monitorType: 'ultrawide' }}
             rightAgent={{ name: 'Elena', color: '#d0bcff', monitorType: 'dual' }}
+            deskColor="#5a422d"
+            deskPadColor="#263240"
           />
 
           {/* South Pod: Alex & Maya */}
@@ -759,15 +834,20 @@ export const OfficeCanvas: React.FC = () => {
             podLabel="SOUTH BENCH // ALEX & MAYA"
             leftAgent={{ name: 'Alex', color: '#4cd7f6', monitorType: 'ultrawide' }}
             rightAgent={{ name: 'Maya', color: '#10b981', monitorType: 'dual' }}
+            deskColor="#2d4652"
+            deskPadColor="#172934"
           />
 
-          {/* 4. Pantry & Espresso Bar (West Corner) */}
+          {/* 4. Private delivery room for the human BOSS */}
+          <BossRoom />
+
+          {/* 5. Pantry & Espresso Bar (West Corner) */}
           <EspressoPantry position={[-4.8, 0, 3.4]} />
 
-          {/* 5. Round Meeting Table (East Corner) */}
+          {/* 6. Round Meeting Table (East Corner) */}
           <RoundMeetingTable position={[4.8, 0, 3.4]} />
 
-          {/* 6. Active Autonomous Characters */}
+          {/* 7. Active Autonomous Characters */}
           {Object.values(agents).map((agent) => (
             <AgentCharacter key={agent.id} agent={agent} />
           ))}

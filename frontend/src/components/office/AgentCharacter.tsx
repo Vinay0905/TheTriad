@@ -152,7 +152,27 @@ export const AgentCharacter: React.FC<AgentCharacterProps> = ({ agent }) => {
       }
     }
 
-    // 2. Procedural Animation States for Architectural Figurine
+    // 2. Personal Space / Anti-Overlap Separation
+    // If another agent is within 0.65m footprint, apply a soft offset so characters never overlap
+    if (!isDragging) {
+      const allAgents = useOfficeStore.getState().agents;
+      for (const [otherId, other] of Object.entries(allAgents)) {
+        if (otherId === agent.id) continue;
+        const otherWp = OFFICE_WAYPOINTS[other.currentWaypoint];
+        if (otherWp) {
+          const dx = pos.x - otherWp.x;
+          const dz = pos.z - otherWp.z;
+          const dist = Math.hypot(dx, dz);
+          if (dist < 0.65 && dist > 0.001) {
+            const pushFactor = ((0.65 - dist) / dist) * 0.08;
+            pos.x += dx * pushFactor;
+            pos.z += dz * pushFactor;
+          }
+        }
+      }
+    }
+
+    // 3. Procedural Animation States for Architectural Figurine
     const isWalking = !!currentTargetRef.current;
     if (isWalking) {
       // Subtle vertical bobbing during movement

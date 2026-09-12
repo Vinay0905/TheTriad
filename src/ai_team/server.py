@@ -1,11 +1,14 @@
 """FastAPI ASGI Server with WebSocket Event Hub and LangGraph Task Execution."""
 
 import asyncio
+import io
 import os
 import uuid
+import zipfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, BackgroundTasks
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from langgraph.types import Command
@@ -127,23 +130,23 @@ def run_pipeline_thread(thread_id: str, task: str):
                         AgentStatusEvent(agent_id="researcher", status_text="Elena: Monitoring API specifications...", animation="Sit")
                     )
                 elif node_name == "developer_node":
-                    # QA review is a deliberate hand-off from build to audit.
+                    # QA review is a deliberate hand-off from build to audit (stands beside Alex at desk_alex_review).
                     event_bus.dispatch(
-                        AgentMoveEvent(agent_id="qa", from_node="desk_maya", to_node="desk_alex", action="Walk")
+                        AgentMoveEvent(agent_id="qa", from_node="desk_maya", to_node="desk_alex_review", action="Walk")
                     )
                     event_bus.dispatch(
                         AgentStatusEvent(agent_id="qa", status_text="Maya: Scrutinizing edge cases & race conditions...", animation="Type")
                     )
                 elif node_name == "qa_audit_node":
-                    # QA findings and the manager meet at the approval board.
+                    # QA findings and the manager meet at the approval board at distinct non-overlapping spots.
                     event_bus.dispatch(
-                        AgentMoveEvent(agent_id="qa", from_node="desk_alex", to_node="whiteboard", action="Walk")
+                        AgentMoveEvent(agent_id="qa", from_node="desk_alex_review", to_node="whiteboard_qa", action="Walk")
                     )
                     event_bus.dispatch(
                         AgentStatusEvent(agent_id="qa", status_text="Maya: Presenting QA findings for approval...", animation="Walk")
                     )
                     event_bus.dispatch(
-                        AgentMoveEvent(agent_id="manager", from_node="desk_david", to_node="whiteboard", action="Walk")
+                        AgentMoveEvent(agent_id="manager", from_node="desk_david", to_node="whiteboard_manager", action="Walk")
                     )
                     event_bus.dispatch(
                         AgentStatusEvent(agent_id="manager", status_text="David: Calling team to Whiteboard for approval...", animation="Sit")
@@ -153,6 +156,8 @@ def run_pipeline_thread(thread_id: str, task: str):
         snapshot = triad_app.get_state(graph_config)
         if snapshot.next:
             bundle = snapshot.values.get("execution_bundle", {})
+            if thread_id in ACTIVE_RUNS and "workspace_path" in bundle:
+                ACTIVE_RUNS[thread_id]["workspace_path"] = bundle["workspace_path"]
             qa_feedback = snapshot.values.get("qa_feedback", "Verified all constraints.")
             code_preview = bundle.get("source_files", {}).get("main.py", "")
             digest = bundle.get("bundle_digest", "")
@@ -285,6 +290,57 @@ async def respond_to_gate(request: GateResponseRequest, background_tasks: Backgr
     background_tasks.add_task(resume_thread)
 
     return {"status": "RESUMED", "action": action}
+
+
+@app.get("/api/runs/{thread_id}/download")
+async def download_run_files(thread_id: str):
+    """Packages all synthesized project source and test files into a zip archive for offline inspection."""
+    workspace: Optional[Path] = None
+    if thread_id in ACTIVE_RUNS and "workspace_path" in ACTIVE_RUNS[thread_id]:
+        ws_path = Path(ACTIVE_RUNS[thread_id]["workspace_path"])
+        if ws_path.exists():
+            workspace = ws_path
+
+    if not workspace:
+        # Fallback to newest run directory in .runs
+        runs_dir = Path(".runs")
+        if runs_dir.exists():
+            run_dirs = sorted(
+                [d for d in runs_dir.iterdir() if d.is_dir() and d.name.startswith("run_")],
+                key=lambda d: d.stat().st_mtime,
+                reverse=True,
+            )
+            for r in run_dirs:
+                ws = r / "workspace"
+                if ws.exists() and any(ws.glob("*.py")):
+                    workspace = ws
+                    break
+
+    if not workspace or not workspace.exists():
+        raise HTTPException(status_code=404, detail="Project files not found for this run.")
+
+    zip_buffer = io.BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for file_path in workspace.rglob("*"):
+            if "__pycache__" in file_path.parts or file_path.name.endswith(".pyc"):
+                continue
+            if file_path.is_file():
+                arcname = file_path.relative_to(workspace)
+                zf.write(file_path, arcname=str(arcname))
+
+    zip_buffer.seek(0)
+    safe_thread_id = thread_id.replace(" ", "_")
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=triadcouncil-project-{safe_thread_id}.zip"},
+    )
+
+
+@app.get("/api/runs/download/latest")
+async def download_latest_run_files():
+    """Download the most recently executed project files."""
+    return await download_run_files("latest")
 
 
 def main():

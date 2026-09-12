@@ -3,6 +3,7 @@ import { useOfficeStore } from '../store/useOfficeStore';
 
 export const useOfficeSocket = () => {
   const wsRef = useRef<WebSocket | null>(null);
+  const deliveryTimerRef = useRef<number | null>(null);
   const {
     setAgentStatus,
     setAgentMovement,
@@ -58,16 +59,28 @@ export const useOfficeSocket = () => {
               break;
 
             case 'PROJECT_COMPLETED':
-              setRunning(false);
+              // Delivery is a human moment, not an instant status flip. David
+              // walks into the private BOSS room before the report is opened.
+              setAgentStatus('manager', 'Walk', 'David: Bringing the verified delivery to BOSS...');
+              setAgentMovement('manager', 'boss_room');
               appendTerminalLog(
                 'stdout',
                 `\n[PROJECT COMPLETED] ${data.summary}`
               );
-              useOfficeStore.getState().openDelivery(
-                data.thread_id,
-                data.success,
-                data.summary
-              );
+              if (deliveryTimerRef.current !== null) window.clearTimeout(deliveryTimerRef.current);
+              deliveryTimerRef.current = window.setTimeout(() => {
+                useOfficeStore.getState().setAgentStatus(
+                  'manager',
+                  'Sit',
+                  'David: Waiting for BOSS acknowledgement.',
+                );
+                useOfficeStore.getState().openDelivery(
+                  data.thread_id,
+                  data.success,
+                  data.summary,
+                );
+                deliveryTimerRef.current = null;
+              }, 4200);
               break;
 
             default:
@@ -95,6 +108,7 @@ export const useOfficeSocket = () => {
     return () => {
       clearTimeout(reconnectTimeout);
       clearInterval(pingInterval);
+      if (deliveryTimerRef.current !== null) window.clearTimeout(deliveryTimerRef.current);
       wsRef.current?.close();
     };
   }, [setAgentStatus, setAgentMovement, appendTerminalLog, openGate, setRunning]);

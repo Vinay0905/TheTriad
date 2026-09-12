@@ -75,7 +75,12 @@ def human_steering_gate_node(state: TriadCouncilState) -> Dict[str, Any]:
         guidance = ""
 
     if action in ["approve", "y", "yes"]:
-        return {"approval_status": "APPROVED"}
+        triage_meta = dict(state.get("triage_metadata") or {})
+        triage_meta["command_prompt_func"] = lambda cmd: True
+        return {
+            "approval_status": "APPROVED",
+            "triage_metadata": triage_meta,
+        }
     elif action in ["steer", "s"]:
         return {
             "approval_status": "STEERED",

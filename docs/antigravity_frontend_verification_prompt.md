@@ -31,9 +31,15 @@ Acceptance checks:
    exist in WaypointGraph.ts. No agent is sent through furniture or a missing node.
 4. Agent movement reaches its target, updates currentWaypoint, and does not get
    stuck if a workflow event supersedes a background move.
-5. TypeScript builds cleanly (`npm run build` from frontend) and Python source
+5. When the backend emits PROJECT_COMPLETED, David walks to the `boss_room`
+   waypoint before the delivery modal opens. Acknowledging that modal sends him
+   back to `desk_david`; only then may between-run office life resume.
+6. The BOSS room is visibly distinct in the north-east corner, and all room,
+   floor, desk, and accent colors remain visually separated rather than using
+   competing full-saturation tones.
+7. TypeScript builds cleanly (`npm run build` from frontend) and Python source
    compiles (`python3 -m compileall -q src`).
-6. Do not weaken the approval gate, alter server execution permissions, or turn
+8. Do not weaken the approval gate, alter server execution permissions, or turn
    decorative movement into a claim of real agent progress.
 
 Return: pass/fail for every check, file-and-line references for failures,
