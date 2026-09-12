@@ -154,28 +154,21 @@ export const AgentCharacter: React.FC<AgentCharacterProps> = ({ agent }) => {
       }
     }
 
-    // 2. Personal Space / Anti-Overlap Separation
-    // If another agent is within 0.65m footprint, apply a soft offset so characters never overlap
-    if (!isDragging) {
-      const allAgents = useOfficeStore.getState().agents;
-      for (const [otherId, other] of Object.entries(allAgents)) {
-        if (otherId === agent.id) continue;
-        const otherWp = OFFICE_WAYPOINTS[other.currentWaypoint];
-        if (otherWp) {
-          const dx = pos.x - otherWp.x;
-          const dz = pos.z - otherWp.z;
-          const dist = Math.hypot(dx, dz);
-          if (dist < 0.65 && dist > 0.001) {
-            const pushFactor = ((0.65 - dist) / dist) * 0.08;
-            pos.x += dx * pushFactor;
-            pos.z += dz * pushFactor;
-          }
-        }
+    const isWalking = !!currentTargetRef.current;
+
+    // 2. Personal Space & Meeting Seating Orientation
+    if (!isWalking) {
+      // Face towards center of meeting table when at meeting seats
+      if (agent.currentWaypoint.startsWith('meeting')) {
+        const tableCenter = new THREE.Vector3(4.8, 0, 3.4);
+        const lookDir = tableCenter.clone().sub(pos).normalize();
+        const targetAngle = Math.atan2(lookDir.x, lookDir.z);
+        const targetQuat = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), targetAngle);
+        groupRef.current.quaternion.slerp(targetQuat, 1 - Math.exp(-8 * delta));
       }
     }
 
     // 3. Procedural Animation States for Architectural Figurine
-    const isWalking = !!currentTargetRef.current;
     if (isWalking) {
       // Subtle vertical bobbing during movement
       groupRef.current.position.y = Math.abs(Math.sin(time * 7.5)) * 0.05;

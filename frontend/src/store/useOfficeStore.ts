@@ -44,7 +44,9 @@ interface OfficeState {
   setObjective: (objective: string) => void;
   setRunning: (running: boolean, threadId?: string) => void;
   setOfficeClock: (clock: OfficeClock) => void;
+  tickLocalClock: () => void;
   setWorkforcePresent: (present: boolean) => void;
+  setAgentPresent: (agentId: string, present: boolean) => void;
 }
 
 export const useOfficeStore = create<OfficeState>((set) => ({
@@ -282,10 +284,49 @@ export const useOfficeStore = create<OfficeState>((set) => ({
   setRunning: (running, threadId) =>
     set({ isRunning: running, activeThreadId: threadId || null }),
   setOfficeClock: (officeClock) => set({ officeClock }),
+  tickLocalClock: () =>
+    set((state) => {
+      const { phase, dayNumber, secondsRemaining } = state.officeClock;
+      const nextRemaining = Math.max(0, secondsRemaining - 1);
+      const WORKDAY_SECS = 1200; // 20 real minutes
+      const WORKDAY_SIMULATED_MINUTES = 480; // 09:00 to 17:00 = 8 simulated hours
+
+      let newDisplayTime = state.officeClock.displayTime;
+      if (phase === 'WORKDAY') {
+        const elapsed = Math.max(0, WORKDAY_SECS - nextRemaining);
+        const simMins = Math.min(WORKDAY_SIMULATED_MINUTES, Math.floor((elapsed / WORKDAY_SECS) * WORKDAY_SIMULATED_MINUTES));
+        const totalMins = 9 * 60 + simMins;
+        const hh = String(Math.floor(totalMins / 60)).padStart(2, '0');
+        const mm = String(totalMins % 60).padStart(2, '0');
+        newDisplayTime = `${hh}:${mm}`;
+      } else {
+        newDisplayTime = '17:00';
+      }
+
+      return {
+        officeClock: {
+          phase,
+          dayNumber,
+          secondsRemaining: nextRemaining,
+          displayTime: newDisplayTime,
+        },
+      };
+    }),
   setWorkforcePresent: (present) =>
     set((state) => ({
       agents: Object.fromEntries(
         Object.entries(state.agents).map(([id, agent]) => [id, { ...agent, isPresent: present }]),
       ),
     })),
+  setAgentPresent: (agentId, present) =>
+    set((state) => {
+      const agent = state.agents[agentId];
+      if (!agent) return state;
+      return {
+        agents: {
+          ...state.agents,
+          [agentId]: { ...agent, isPresent: present },
+        },
+      };
+    }),
 }));

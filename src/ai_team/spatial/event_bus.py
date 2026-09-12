@@ -66,15 +66,16 @@ class OfficeEventBus:
         payload_dict = event.model_dump()
         payload_json = json.dumps(payload_dict)
 
-        # 1. Append-only persistence
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.execute(
-                    "INSERT INTO office_events (timestamp, event_type, payload) VALUES (?, ?, ?)",
-                    (event.timestamp, event.event_type, payload_json),
-                )
-        except Exception as e:
-            print(f"[EventBus Error] Failed to log event to SQLite: {e}")
+        # 1. Append-only persistence (skip high-frequency 1s clock ticks to prevent DB lock/thrashing)
+        if event.event_type != "OFFICE_CLOCK":
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.execute(
+                        "INSERT INTO office_events (timestamp, event_type, payload) VALUES (?, ?, ?)",
+                        (event.timestamp, event.event_type, payload_json),
+                    )
+            except Exception as e:
+                print(f"[EventBus Error] Failed to log event to SQLite: {e}")
 
         # 2. WebSocket fan-out
         disconnected = []

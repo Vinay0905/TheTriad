@@ -135,12 +135,41 @@ export const OFFICE_WAYPOINTS: Record<string, Waypoint> = {
     z: 2.45,
     neighbors: ['corridor_south', 'aisle_south_west'],
   },
+  // Dedicated Meeting Seats around Round Table (Center: x=4.8, z=3.4, Radius=1.55)
   meeting: {
     id: 'meeting',
-    name: 'Nordic Meeting Table',
-    x: 3.3, // West chair slot of meeting table in open space (NOT inside tabletop)
+    name: 'Nordic Meeting Table (West Seat)',
+    x: 3.25,
     z: 3.4,
-    neighbors: ['aisle_south_east', 'corridor_east'],
+    neighbors: ['aisle_south_east', 'corridor_east', 'meeting_david', 'meeting_alex'],
+  },
+  meeting_david: {
+    id: 'meeting_david',
+    name: 'Nordic Meeting Table (North Seat - David)',
+    x: 4.8,
+    z: 1.85,
+    neighbors: ['corridor_east', 'aisle_south_east', 'meeting', 'meeting_elena'],
+  },
+  meeting_elena: {
+    id: 'meeting_elena',
+    name: 'Nordic Meeting Table (East Seat - Elena)',
+    x: 6.35,
+    z: 3.4,
+    neighbors: ['aisle_south_east', 'meeting_david', 'meeting_maya'],
+  },
+  meeting_alex: {
+    id: 'meeting_alex',
+    name: 'Nordic Meeting Table (West Seat - Alex)',
+    x: 3.25,
+    z: 3.4,
+    neighbors: ['aisle_south_east', 'corridor_east', 'meeting_david', 'meeting_maya'],
+  },
+  meeting_maya: {
+    id: 'meeting_maya',
+    name: 'Nordic Meeting Table (South Seat - Maya)',
+    x: 4.8,
+    z: 4.95,
+    neighbors: ['aisle_south_east', 'meeting_alex', 'meeting_elena'],
   },
   boss_foyer: {
     id: 'boss_foyer',

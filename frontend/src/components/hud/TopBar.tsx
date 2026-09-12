@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useOfficeStore } from '../../store/useOfficeStore';
-import { Play, Loader2, Sparkles, Download } from 'lucide-react';
+import { Play, Loader2, Sparkles, Download, Clock } from 'lucide-react';
 
 export const TopBar: React.FC = () => {
   const [inputTask, setInputTask] = useState('');
@@ -82,6 +82,20 @@ export const TopBar: React.FC = () => {
           <span className="w-px h-3 bg-border mx-1" />
           <span className="font-mono text-[11px] text-on-surface-variant">GATE:</span>
           <span className="font-mono text-[11px] font-semibold text-secondary">ENFORCED</span>
+        </div>
+
+        {/* Real-time Office Clock Telemetry Pill */}
+        <div
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-mono font-semibold transition-all ${
+            officeClosed
+              ? 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+              : 'bg-cyan-500/10 border-cyan-500/30 text-cyan-200'
+          }`}
+          title={`Simulated Workday: 09:00 - 17:00 (20 real minutes). Remaining: ${Math.ceil(officeClock.secondsRemaining / 60)}m`}
+        >
+          <Clock className={`w-3.5 h-3.5 ${officeClosed ? 'text-rose-400' : 'text-cyan-400'}`} />
+          <span className="tabular-nums tracking-wider text-[11px] font-bold">{officeClock.displayTime}</span>
+          <span className="text-[10px] opacity-75">{officeClosed ? 'OFF-HOURS' : `D${officeClock.dayNumber}`}</span>
         </div>
 
         {/* Quick Download Latest Run ZIP */}

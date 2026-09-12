@@ -408,15 +408,15 @@ async def respond_to_gate(request: GateResponseRequest, background_tasks: Backgr
             report = final_state.values.get("final_status_report", "Task completed.")
             success = final_state.values.get("approval_status") == "APPROVED"
 
-            # David announces completion and team returns to workstations
-            event_bus.dispatch(
-                AgentStatusEvent(agent_id="manager", status_text="David: Project delivery complete!", animation="Sit")
-            )
-            event_bus.dispatch(
-                AgentMoveEvent(agent_id="manager", from_node="whiteboard", to_node="desk_david", action="Walk")
-            )
+            # QA returns to workstation while David brings the completed delivery to BOSS room
             event_bus.dispatch(
                 AgentMoveEvent(agent_id="qa", from_node="whiteboard", to_node="desk_maya", action="Walk")
+            )
+            event_bus.dispatch(
+                AgentStatusEvent(agent_id="manager", status_text="David: Delivering completed project to BOSS room...", animation="Walk")
+            )
+            event_bus.dispatch(
+                AgentMoveEvent(agent_id="manager", from_node="whiteboard", to_node="boss_room", action="Walk")
             )
             event_bus.dispatch(
                 ProjectCompletedEvent(

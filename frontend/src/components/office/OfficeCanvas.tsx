@@ -199,22 +199,22 @@ const NorthWall: React.FC<{ position: [number, number, number] }> = ({ position 
   );
 };
 
-/** Server-synchronised clock beside the presentation board. */
+/** Server-synchronised clock to the left of the presentation board. */
 const OfficeWallClock: React.FC = () => {
   const clock = useOfficeStore((state) => state.officeClock);
   const offHours = clock.phase === 'OFF_HOURS';
 
   return (
-    <group position={[3.15, 2.5, -7.82]}>
+    <group position={[-3.1, 2.6, -7.84]}>
       <mesh castShadow>
-        <boxGeometry args={[1.45, 0.78, 0.08]} />
+        <boxGeometry args={[1.1, 0.62, 0.06]} />
         <meshStandardMaterial color={offHours ? '#221a22' : '#101d25'} metalness={0.45} roughness={0.32} />
       </mesh>
-      <Html center transform distanceFactor={12} position={[0, 0, 0.055]} style={{ pointerEvents: 'none' }}>
-        <div className={`w-[126px] rounded border px-2 py-1.5 text-center font-mono shadow-xl ${offHours ? 'border-rose-400/40 bg-[#20151f]/95 text-rose-200' : 'border-cyan-300/35 bg-[#0d1922]/95 text-cyan-100'}`}>
-          <div className="text-[9px] font-bold tracking-[0.16em]">{offHours ? 'OFF HOURS' : 'TRIAD TIME'}</div>
-          <div className="mt-0.5 text-[19px] font-bold leading-none tabular-nums">{clock.displayTime}</div>
-          <div className="mt-1 text-[8px] tracking-wide opacity-75">DAY {clock.dayNumber} · {Math.ceil(clock.secondsRemaining / 60)} MIN</div>
+      <Html center transform distanceFactor={11} position={[0, 0, 0.04]} style={{ pointerEvents: 'none' }}>
+        <div className={`w-[98px] rounded border px-1.5 py-1 text-center font-mono shadow-xl ${offHours ? 'border-rose-400/40 bg-[#20151f]/95 text-rose-200' : 'border-cyan-300/35 bg-[#0d1922]/95 text-cyan-100'}`}>
+          <div className="text-[8px] font-bold tracking-[0.14em]">{offHours ? 'OFF HOURS' : 'TRIAD TIME'}</div>
+          <div className="mt-0.5 text-[15px] font-bold leading-none tabular-nums">{clock.displayTime}</div>
+          <div className="mt-0.5 text-[7px] tracking-wide opacity-75">DAY {clock.dayNumber} · {Math.ceil(clock.secondsRemaining / 60)}m</div>
         </div>
       </Html>
     </group>

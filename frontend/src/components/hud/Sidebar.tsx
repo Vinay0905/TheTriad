@@ -217,7 +217,18 @@ export const Sidebar: React.FC = () => {
             </button>
             <button
               disabled={isRunning}
-              onClick={() => handleCommandWalk('meeting', 'Heading to Round Meeting Table...')}
+              onClick={() => {
+                if (currentAgent) {
+                  const meetingSeats: Record<string, string> = {
+                    manager: 'meeting_david',
+                    researcher: 'meeting_elena',
+                    developer: 'meeting_alex',
+                    qa: 'meeting_maya',
+                  };
+                  const seat = meetingSeats[currentAgent.id] || 'meeting';
+                  handleCommandWalk(seat, 'Heading to Round Meeting Table...');
+                }
+              }}
               className="p-2 rounded bg-surface-container hover:bg-surface-bright disabled:opacity-40 disabled:cursor-not-allowed text-emerald-400 text-left flex items-center gap-1.5 border border-emerald-400/20 transition-all hover:scale-[1.02]"
             >
               <Users className="w-3.5 h-3.5" />

@@ -59,9 +59,19 @@ export const OfficeLife: FC = () => {
         await wait(TRAVEL_MS);
         if (!shouldContinue()) break;
 
+        // When stepping outside through exit, avatar and nameplate leave the room
+        if (routine.destination === 'exit') {
+          useOfficeStore.getState().setAgentPresent(routine.agentId, false);
+        }
+
         useOfficeStore.getState().setAgentStatus(routine.agentId, routine.activityAnimation, routine.activityStatus);
         await wait(routine.dwellMs);
         if (!shouldContinue()) break;
+
+        // Restore presence when coming back in through the door
+        if (routine.destination === 'exit') {
+          useOfficeStore.getState().setAgentPresent(routine.agentId, true);
+        }
 
         useOfficeStore.getState().setAgentStatus(routine.agentId, 'Walk', 'Heading back to their workstation...');
         useOfficeStore.getState().setAgentMovement(routine.agentId, HOME_DESKS[routine.agentId]);
@@ -82,6 +92,7 @@ export const OfficeLife: FC = () => {
         for (const [id, ag] of Object.entries(state.agents)) {
           const homeDesk = HOME_DESKS[id as Routine['agentId']];
           if (homeDesk && ag.targetWaypoint !== homeDesk && !ag.targetWaypoint.startsWith('desk_')) {
+            useOfficeStore.getState().setAgentPresent(id, true);
             useOfficeStore.getState().setAgentMovement(id, homeDesk);
             useOfficeStore.getState().setAgentStatus(id, 'Walk', 'Returning to workstation for run...');
           }

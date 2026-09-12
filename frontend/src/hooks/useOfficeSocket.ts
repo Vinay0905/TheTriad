@@ -12,8 +12,18 @@ export const useOfficeSocket = () => {
     openGate,
     setRunning,
     setOfficeClock,
+    tickLocalClock,
     setWorkforcePresent,
   } = useOfficeStore();
+
+  // Local ticker: smoothly advances the simulated workday clock every second
+  // (Server synchronizes authoritative values via WebSocket OFFICE_CLOCK events)
+  useEffect(() => {
+    const clockInterval = setInterval(() => {
+      tickLocalClock();
+    }, 1000);
+    return () => clearInterval(clockInterval);
+  }, [tickLocalClock]);
 
   useEffect(() => {
     let reconnectTimeout: NodeJS.Timeout;
