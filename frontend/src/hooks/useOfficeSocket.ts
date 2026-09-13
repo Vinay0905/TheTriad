@@ -1,153 +1,220 @@
 import { useEffect, useRef } from 'react';
 import { useOfficeStore } from '../store/useOfficeStore';
+import type { OfficeEvent } from '../types/office';
 
+const RECONNECT_DELAY_MS = 2000;
+const PING_INTERVAL_MS = 15000;
+const DELIVERY_WALK_MS = 3600;
+
+/**
+ * The single WebSocket connection to the office.
+ *
+ * Two deliberate choices here:
+ *
+ * - The hook subscribes to nothing. Every handler reaches the store through
+ *   `getState()`, so terminal output and clock ticks cannot re-render this
+ *   component. Destructuring the store, as the previous version did, meant a
+ *   re-render on literally every state change.
+ * - `cancelled` guards the reconnect. Without it, React StrictMode's
+ *   mount/unmount/mount left an orphaned socket that kept its ping interval
+ *   alive and kept scheduling reconnects forever.
+ */
 export const useOfficeSocket = () => {
-  const wsRef = useRef<WebSocket | null>(null);
   const deliveryTimerRef = useRef<number | null>(null);
-  const clockOutTimerRef = useRef<number | null>(null);
-  const {
-    setAgentStatus,
-    setAgentMovement,
-    appendTerminalLog,
-    openGate,
-    setRunning,
-    setOfficeClock,
-    tickLocalClock,
-    setWorkforcePresent,
-  } = useOfficeStore();
 
-  // Local ticker: smoothly advances the simulated workday clock every second
-  // (Server synchronizes authoritative values via WebSocket OFFICE_CLOCK events)
+  // Interpolates the clock between the server's coarse updates.
   useEffect(() => {
-    const clockInterval = setInterval(() => {
-      tickLocalClock();
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        useOfficeStore.getState().tickLocalClock();
+      }
     }, 1000);
-    return () => clearInterval(clockInterval);
-  }, [tickLocalClock]);
+    return () => window.clearInterval(interval);
+  }, []);
 
   useEffect(() => {
-    let reconnectTimeout: NodeJS.Timeout;
-    let pingInterval: NodeJS.Timeout;
+    let cancelled = false;
+    let socket: WebSocket | null = null;
+    let reconnectTimer: number | undefined;
+    let pingTimer: number | undefined;
+
+    const handle = (event: OfficeEvent) => {
+      const store = useOfficeStore.getState();
+
+      switch (event.event_type) {
+        case 'AGENT_MOVE':
+          store.setAgentMovement(event.agent_id, event.to_node, event.slot_id ?? null);
+          break;
+
+        case 'AGENT_STATUS':
+          store.setAgentStatus(event.agent_id, event.animation, event.status_text);
+          break;
+
+        case 'AGENT_WAITING':
+          // A rate limit reads as a person waiting, with a live countdown.
+          store.setAgentWaiting(event.agent_id, {
+            provider: event.provider,
+            model: event.model,
+            reason: event.reason,
+            retryAfterSeconds: event.retry_after_seconds,
+            waitStartedAt: Date.now(),
+            attempt: event.attempt,
+            maxAttempts: event.max_attempts,
+          });
+          store.setAgentStatus(event.agent_id, 'Wait', event.reason);
+          break;
+
+        case 'AGENT_CLOCK_OUT':
+          store.setAgentWaiting(event.agent_id, null);
+          store.setAgentAbsence(event.agent_id, {
+            provider: event.provider,
+            reason: event.reason,
+            resetAtDisplay: event.reset_at_display ?? null,
+            coveredBy: event.covered_by ?? null,
+          });
+          store.setAgentStatus(event.agent_id, 'Walk', event.reason);
+          break;
+
+        case 'AGENT_CLOCK_IN':
+          store.setAgentAbsence(event.agent_id, null);
+          store.setAgentWaiting(event.agent_id, null);
+          break;
+
+        case 'AGENT_BREAK':
+          // Movement already arrives via AGENT_MOVE; this only annotates why.
+          store.setAgentStatus(
+            event.agent_id,
+            event.break_type === 'COFFEE' ? 'Coffee' : 'Walk',
+            event.returning ? 'Heading back to their desk...' : event.destination,
+          );
+          break;
+
+        case 'PROVIDER_HEALTH':
+          store.setProviderHealth({
+            roles: event.roles,
+            sandboxAvailable: event.sandbox_available,
+            sandboxBackend: event.sandbox_backend,
+          });
+          break;
+
+        case 'RED_GREEN_STATUS':
+          store.setRedStatus(event.phase);
+          break;
+
+        case 'TERMINAL_LOG':
+          store.appendTerminalLog(event.stream, event.chunk);
+          break;
+
+        case 'WHITEBOARD_GATE':
+          store.openGate({
+            threadId: event.thread_id,
+            task: event.task,
+            codePreview: event.code_preview,
+            qaReport: event.qa_report,
+            digest: event.bundle_digest,
+            qaStatus: event.qa_status,
+            redStatus: event.red_status,
+            files: event.files,
+            commands: event.commands,
+            gateKind: event.gate_kind,
+          });
+          break;
+
+        case 'PROJECT_COMPLETED': {
+          // Delivery is a moment, not an instant flip: David walks the result
+          // into the BOSS room before the report opens.
+          store.setAgentStatus('manager', 'Walk', 'David: Taking the outcome to BOSS...');
+          store.appendTerminalLog('stdout', `\n[RUN COMPLETE] ${event.summary}`);
+
+          if (deliveryTimerRef.current !== null) {
+            window.clearTimeout(deliveryTimerRef.current);
+          }
+          deliveryTimerRef.current = window.setTimeout(() => {
+            useOfficeStore.getState().openDelivery({
+              threadId: event.thread_id,
+              success: event.success,
+              summary: event.summary,
+              approvalStatus: event.approval_status ?? null,
+              exitCode: event.exit_code ?? null,
+              failingTestsCount: event.failing_tests_count ?? 0,
+              traceUrl: event.trace_url ?? null,
+              bundleDigest: event.bundle_digest ?? null,
+            });
+            deliveryTimerRef.current = null;
+          }, DELIVERY_WALK_MS);
+          break;
+        }
+
+        case 'OFFICE_CLOCK':
+          store.setOfficeClock({
+            phase: event.phase,
+            displayTime: event.display_time,
+            dayNumber: event.day_number,
+            secondsRemaining: event.seconds_remaining,
+          });
+          break;
+
+        case 'OFFICE_SCHEDULE_TICK':
+          // Presence is driven by AGENT_MOVE; nothing to do but stay in sync.
+          break;
+
+        default:
+          break;
+      }
+    };
 
     const connect = () => {
+      if (cancelled) return;
+
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = `${protocol}//${window.location.host}/ws/office`;
+      socket = new WebSocket(`${protocol}//${window.location.host}/ws/office`);
 
-      const ws = new WebSocket(wsUrl);
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log('✅ [Office WebSocket] Connected to server.');
-        pingInterval = setInterval(() => {
-          if (ws.readyState === WebSocket.OPEN) {
-            ws.send(JSON.stringify({ type: 'PING' }));
+      socket.onopen = () => {
+        if (cancelled) {
+          socket?.close();
+          return;
+        }
+        useOfficeStore.getState().setConnected(true);
+        pingTimer = window.setInterval(() => {
+          if (socket?.readyState === WebSocket.OPEN) {
+            socket.send(JSON.stringify({ type: 'PING' }));
           }
-        }, 15000);
+        }, PING_INTERVAL_MS);
       };
 
-      ws.onmessage = (event) => {
+      socket.onmessage = (message) => {
+        if (cancelled) return;
         try {
-          const data = JSON.parse(event.data);
-          switch (data.event_type) {
-            case 'AGENT_MOVE':
-              setAgentMovement(data.agent_id, data.to_node);
-              break;
-
-            case 'AGENT_STATUS':
-              setAgentStatus(data.agent_id, data.animation, data.status_text);
-              break;
-
-            case 'WHITEBOARD_GATE':
-              openGate(
-                data.thread_id,
-                data.task,
-                data.code_preview,
-                data.qa_report,
-                data.bundle_digest
-              );
-              break;
-
-            case 'TERMINAL_LOG':
-              appendTerminalLog(data.stream, data.chunk);
-              break;
-
-            case 'PROJECT_COMPLETED':
-              // Delivery is a human moment, not an instant status flip. David
-              // walks into the private BOSS room before the report is opened.
-              setAgentStatus('manager', 'Walk', 'David: Bringing the verified delivery to BOSS...');
-              setAgentMovement('manager', 'boss_room');
-              appendTerminalLog(
-                'stdout',
-                `\n[PROJECT COMPLETED] ${data.summary}`
-              );
-              if (deliveryTimerRef.current !== null) window.clearTimeout(deliveryTimerRef.current);
-              deliveryTimerRef.current = window.setTimeout(() => {
-                useOfficeStore.getState().setAgentStatus(
-                  'manager',
-                  'Sit',
-                  'David: Waiting for BOSS acknowledgement.',
-                );
-                useOfficeStore.getState().openDelivery(
-                  data.thread_id,
-                  data.success,
-                  data.summary,
-                );
-                deliveryTimerRef.current = null;
-              }, 4200);
-              break;
-
-            case 'OFFICE_CLOCK':
-              setOfficeClock({
-                phase: data.phase,
-                displayTime: data.display_time,
-                dayNumber: data.day_number,
-                secondsRemaining: data.seconds_remaining,
-              });
-              if (data.phase === 'OFF_HOURS') {
-                const anyoneStillPresent = Object.values(useOfficeStore.getState().agents)
-                  .some((agent) => agent.isPresent !== false);
-                if (anyoneStillPresent && clockOutTimerRef.current === null) {
-                  clockOutTimerRef.current = window.setTimeout(() => {
-                    useOfficeStore.getState().setWorkforcePresent(false);
-                    clockOutTimerRef.current = null;
-                  }, 4300);
-                }
-              } else {
-                if (clockOutTimerRef.current !== null) window.clearTimeout(clockOutTimerRef.current);
-                if (Object.values(useOfficeStore.getState().agents).some((agent) => agent.isPresent === false)) {
-                  setWorkforcePresent(true);
-                }
-              }
-              break;
-
-            default:
-              break;
-          }
+          handle(JSON.parse(message.data) as OfficeEvent);
         } catch (err) {
-          console.error('[Office WebSocket Error] Message parsing error:', err);
+          console.error('[Office] Unparseable event:', err);
         }
       };
 
-      ws.onclose = () => {
-        console.warn('⚠️ [Office WebSocket] Disconnected. Reconnecting in 2s...');
-        clearInterval(pingInterval);
-        reconnectTimeout = setTimeout(connect, 2000);
+      socket.onclose = () => {
+        window.clearInterval(pingTimer);
+        if (cancelled) return;
+        useOfficeStore.getState().setConnected(false);
+        reconnectTimer = window.setTimeout(connect, RECONNECT_DELAY_MS);
       };
 
-      ws.onerror = (err) => {
-        console.error('[Office WebSocket Error]', err);
-        ws.close();
+      socket.onerror = () => {
+        socket?.close();
       };
     };
 
     connect();
 
     return () => {
-      clearTimeout(reconnectTimeout);
-      clearInterval(pingInterval);
-      if (deliveryTimerRef.current !== null) window.clearTimeout(deliveryTimerRef.current);
-      if (clockOutTimerRef.current !== null) window.clearTimeout(clockOutTimerRef.current);
-      wsRef.current?.close();
+      cancelled = true;
+      window.clearTimeout(reconnectTimer);
+      window.clearInterval(pingTimer);
+      if (deliveryTimerRef.current !== null) {
+        window.clearTimeout(deliveryTimerRef.current);
+        deliveryTimerRef.current = null;
+      }
+      socket?.close();
+      socket = null;
     };
-  }, [setAgentStatus, setAgentMovement, appendTerminalLog, openGate, setRunning, setOfficeClock, setWorkforcePresent]);
+  }, []);
 };

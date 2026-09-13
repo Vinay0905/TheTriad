@@ -16,7 +16,12 @@ from typing import Any, Dict
 from ai_team.config import get_config
 from ai_team.domain.contracts import AgentStatusEvent
 from ai_team.graph.contract_lock import assert_contract_unbroken, frozen_test_source
+from ai_team.graph.nodes._llm import glm_candidate
 from ai_team.graph.state import TriadCouncilState
+from ai_team.providers.resilience import (
+    AllProvidersUnavailableError,
+    call_with_office_presence,
+)
 from ai_team.spatial.event_bus import get_event_bus
 from ai_team.utils import repair_truncated_python_code, validate_python_syntax
 
@@ -118,32 +123,28 @@ def qa_audit_node(state: TriadCouncilState) -> Dict[str, Any]:
             "synthesized_code": {"main.py": main_code, "test_main.py": tests},
         }
 
+    prompt = _AUDIT_PROMPT.format(task=task, main=main_code, tests=tests)
     try:
         print(f"  ... [QA Maya / {config.glm_model}] Running adversarial review...")
-        from langchain_openai import ChatOpenAI
-
-        llm = ChatOpenAI(
-            model=config.glm_model,
-            base_url="https://open.bigmodel.cn/api/paas/v4",
-            api_key=api_key,
-            temperature=0.2,
-            max_tokens=800,
-            request_timeout=30,
+        content, attribution = call_with_office_presence(
+            role="qa_audit",
+            agent_id="qa",
+            candidates=[glm_candidate(config, prompt)],
+            on_wait_status="Maya: the auditor API is rate limiting; waiting to retry.",
         )
-        content = llm.invoke(
-            _AUDIT_PROMPT.format(task=task, main=main_code, tests=tests)
-        ).content.strip()
-    except Exception as err:
+        content = (content or "").strip()
+    except AllProvidersUnavailableError as err:
         # Fail closed. The operator is told the auditor was unreachable and
-        # decides at the gate with that knowledge.
-        print(f"  [QA Maya] Auditor unreachable: {err}")
+        # decides at the gate with that knowledge. This is also where Maya
+        # clocks out of the office if her quota is gone for the day.
+        print(f"  [QA Maya] Auditor unavailable: {err}")
         return {
             "qa_passed": False,
             "qa_skipped": True,
             "qa_feedback": (
                 f"QA unavailable: the {config.glm_model} auditor could not be "
-                f"reached ({str(err)[:120]}). Syntax checks passed, but no "
-                "adversarial audit was performed."
+                f"reached ({'; '.join(err.notes)[:160]}). Syntax checks passed, "
+                "but no adversarial audit was performed."
             ),
             "repair_attempts": state.get("repair_attempts", 0),
             "synthesized_code": {"main.py": main_code, "test_main.py": tests},
@@ -173,6 +174,6 @@ def qa_audit_node(state: TriadCouncilState) -> Dict[str, Any]:
         "synthesized_code": {"main.py": main_code, "test_main.py": tests},
         "provider_attribution": {
             **(state.get("provider_attribution") or {}),
-            "qa_audit": f"zhipuai:{config.glm_model}",
+            "qa_audit": attribution,
         },
     }

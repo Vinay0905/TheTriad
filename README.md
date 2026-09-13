@@ -82,6 +82,20 @@ is no host fallback. See [`execution/sandbox/`](src/ai_team/execution/sandbox/).
 There is no flag, config option, or "trusted mode" that skips the gate, and
 none may be added.
 
+**4. Free-tier limits are shown, not swallowed.** A rate limit renders as an
+agent waiting at their desk with a countdown while the call is retried with
+backoff. An exhausted quota walks that agent out of the office and marks the
+role unavailable until it resets. If a substitute model covers the work, the
+office and the final report both name it — failover is never silent. Previously
+a 429 from the auditor set `qa_passed = True`, so a quota error rendered as a
+passing audit. See [`resilience.py`](src/ai_team/providers/resilience.py).
+
+All office behaviour is decided by one server-side
+[`OfficeDirector`](src/ai_team/spatial/director.py) with priority arbitration
+and slot reservation, so a coffee break cannot preempt a gate presentation and
+two agents are never dispatched to the same chair. Animation never delays the
+pipeline: the graph emits semantic events and moves on.
+
 ---
 
 ## Setup
@@ -143,11 +157,23 @@ python3 run_server.py                    # binds 127.0.0.1:8000 by default
 cd frontend && npm run dev               # http://localhost:5173
 ```
 
-> **Frontend status.** The backend safety work landed ahead of the frontend.
-> Per-run tokens are not yet plumbed through the UI, and the download endpoint's
-> insecure "newest run on disk" fallback has been removed, so the TopBar
-> download link returns 404 until that pass lands. The CLI is the fully wired
-> path today.
+Type an objective, watch the council work, and decide at the whiteboard modal.
+The modal states QA status plainly, lists exactly which files will be written
+and which commands will run, and only closes once the server has accepted your
+decision. Escape is deliberately inert: a stray keypress must not resolve a
+security decision.
+
+`POST /api/tasks/start` issues a **per-run token** to the calling tab, and
+approving or downloading that run requires it. This is not multi-user auth; it
+stops a stray tab from approving a run it did not start. One consequence: only
+the tab that started a run can approve it, and refreshing mid-run loses the
+token.
+
+Add `?perf=1` for a live overlay of draw calls, triangles, and frame time. An
+idle office reports **0 fps**, which is correct — rendering is demand-driven.
+
+See **[TESTING.md](TESTING.md)** for a full macOS walkthrough, including what
+each screen should look like.
 
 ---
 

@@ -1,358 +1,198 @@
-import { Waypoint } from '../../types/office';
+import type { Waypoint } from '../../types/office';
+import {
+  AGENT_RADIUS,
+  DESTINATIONS,
+  isInsideObstacle,
+  resolveDestinationId,
+  resolveSlot,
+} from './OfficeGeometry';
 
-// ============================================================================
-// Strictly Collision-Free Waypoint Graph
-// Geometry bounds:
-// - North Pod (David & Elena desks): x in [-2.5, 2.5], z in [-2.6, -1.0]
-// - South Pod (Alex & Maya desks): x in [-2.5, 2.5], z in [1.0, 2.6]
-// - Pantry & Coffee Bar: x in [-6.5, -3.5], z in [2.6, 5.5]
-// - Meeting Table: x in [3.2, 6.0], z in [2.4, 5.2]
-// - Whiteboard: x in [-3.0, 3.0], z in [-7.0, -5.8]
-//
-// All navigation corridors run exclusively along wide open 2m+ floor lanes:
-// - Central Grand Runway: z = 0 (between Pod 1 & Pod 2)
-// - West Corridor: x = -2.8 (between Pods and Pantry)
-// - East Corridor: x = 2.8 (between Pods and Meeting Table)
-// - North Runway: z = -4.0 (between North Pod and Whiteboard)
-// - South Runway: z = 4.2 (open circulation behind Pod 2)
-// ============================================================================
+/**
+ * Routing over the named destinations declared in `OfficeGeometry`.
+ *
+ * Coordinates are no longer duplicated here: this module derives everything
+ * from the geometry module, which is what removed the class of bug where
+ * `whiteboard` and `whiteboard_researcher` were the same point and two agents
+ * sent to "different" places ended up inside each other.
+ *
+ * Paths are post-processed with a string-pulling pass, so agents cut corners
+ * naturally instead of visibly touching each corridor node in turn.
+ */
 
-export const OFFICE_WAYPOINTS: Record<string, Waypoint> = {
-  // 1. Workstation Desk Slots (Squarely inside chair footprint facing screens)
-  desk_david: {
-    id: 'desk_david',
-    name: "David's Desk (North Pod L)",
-    x: -1.2,
-    z: -1.15,
-    neighbors: ['corridor_center', 'aisle_north_west'],
-  },
-  desk_elena: {
-    id: 'desk_elena',
-    name: "Elena's Desk (North Pod R)",
-    x: 1.2,
-    z: -1.15,
-    neighbors: ['corridor_center', 'aisle_north_east'],
-  },
-  desk_alex: {
-    id: 'desk_alex',
-    name: "Alex's Desk (South Pod L)",
-    x: -1.2,
-    z: 2.45,
-    neighbors: ['aisle_south_west', 'corridor_south'],
-  },
-  desk_maya: {
-    id: 'desk_maya',
-    name: "Maya's Desk (South Pod R)",
-    x: 1.2,
-    z: 2.45,
-    neighbors: ['aisle_south_east', 'corridor_south'],
-  },
+export interface PathPoint {
+  x: number;
+  z: number;
+  id: string;
+}
 
-  // Backwards compatibility mappings
-  desk_manager: {
-    id: 'desk_manager',
-    name: "David's Desk",
-    x: -1.2,
-    z: -1.15,
-    neighbors: ['corridor_center', 'aisle_north_west'],
-  },
-  desk_researcher: {
-    id: 'desk_researcher',
-    name: "Elena's Desk",
-    x: 1.2,
-    z: -1.15,
-    neighbors: ['corridor_center', 'aisle_north_east'],
-  },
-  desk_developer: {
-    id: 'desk_developer',
-    name: "Alex's Desk",
-    x: -1.2,
-    z: 2.45,
-    neighbors: ['aisle_south_west', 'corridor_south'],
-  },
-  desk_qa: {
-    id: 'desk_qa',
-    name: "Maya's Desk",
-    x: 1.2,
-    z: 2.45,
-    neighbors: ['aisle_south_east', 'corridor_south'],
-  },
+/** Compatibility view for anything still expecting a flat waypoint table. */
+export const OFFICE_WAYPOINTS: Record<string, Waypoint> = Object.fromEntries(
+  Object.values(DESTINATIONS).map((destination) => [
+    destination.id,
+    {
+      id: destination.id,
+      name: destination.name,
+      x: destination.slots[0].x,
+      z: destination.slots[0].z,
+      capacity: destination.slots.length,
+      facing: destination.slots[0].facing,
+      neighbors: destination.neighbors,
+    },
+  ]),
+);
 
-  // 2. Main Room Destination Zones (Open floor standing areas, never inside furniture)
-  pantry: {
-    id: 'pantry',
-    name: 'Espresso Bar & Pantry',
-    x: -4.8,
-    z: 1.8, // Clear open aisle in front of espresso bar counter
-    neighbors: ['aisle_south_west', 'corridor_west'],
-  },
-  coffee_lounge: {
-    id: 'coffee_lounge',
-    name: 'Espresso Bar & Pantry',
-    x: -4.8,
-    z: 1.8,
-    neighbors: ['aisle_south_west', 'corridor_west'],
-  },
-  exit: {
-    id: 'exit',
-    name: 'Studio Exit',
-    x: -7.25,
-    z: 2.8,
-    neighbors: ['corridor_west'],
-  },
-  whiteboard: {
-    id: 'whiteboard',
-    name: 'Architecture Whiteboard (Center)',
-    x: 0.0,
-    z: -5.4, // Open aisle in front of whiteboard wall
-    neighbors: ['corridor_north', 'whiteboard_manager', 'whiteboard_qa'],
-  },
-  whiteboard_manager: {
-    id: 'whiteboard_manager',
-    name: 'Architecture Whiteboard (Manager Station L)',
-    x: -1.4,
-    z: -5.4,
-    neighbors: ['corridor_north', 'whiteboard'],
-  },
-  whiteboard_qa: {
-    id: 'whiteboard_qa',
-    name: 'Architecture Whiteboard (QA Station R)',
-    x: 1.4,
-    z: -5.4,
-    neighbors: ['corridor_north', 'whiteboard'],
-  },
-  whiteboard_researcher: {
-    id: 'whiteboard_researcher',
-    name: 'Architecture Whiteboard (Researcher Presenter)',
-    x: 0.0,
-    z: -5.4,
-    neighbors: ['corridor_north', 'whiteboard'],
-  },
-  desk_alex_review: {
-    id: 'desk_alex_review',
-    name: "Alex's Desk (Peer Review Slot)",
-    x: -0.35,
-    z: 2.45,
-    neighbors: ['corridor_south', 'aisle_south_west'],
-  },
-  // Dedicated Meeting Seats around Round Table (Center: x=4.8, z=3.4, Radius=1.55)
-  meeting: {
-    id: 'meeting',
-    name: 'Nordic Meeting Table (West Seat)',
-    x: 3.25,
-    z: 3.4,
-    neighbors: ['aisle_south_east', 'corridor_east', 'meeting_david', 'meeting_alex'],
-  },
-  meeting_david: {
-    id: 'meeting_david',
-    name: 'Nordic Meeting Table (North Seat - David)',
-    x: 4.8,
-    z: 1.85,
-    neighbors: ['corridor_east', 'aisle_south_east', 'meeting', 'meeting_elena'],
-  },
-  meeting_elena: {
-    id: 'meeting_elena',
-    name: 'Nordic Meeting Table (East Seat - Elena)',
-    x: 6.35,
-    z: 3.4,
-    neighbors: ['aisle_south_east', 'meeting_david', 'meeting_maya'],
-  },
-  meeting_alex: {
-    id: 'meeting_alex',
-    name: 'Nordic Meeting Table (West Seat - Alex)',
-    x: 3.25,
-    z: 3.4,
-    neighbors: ['aisle_south_east', 'corridor_east', 'meeting_david', 'meeting_maya'],
-  },
-  meeting_maya: {
-    id: 'meeting_maya',
-    name: 'Nordic Meeting Table (South Seat - Maya)',
-    x: 4.8,
-    z: 4.95,
-    neighbors: ['aisle_south_east', 'meeting_alex', 'meeting_elena'],
-  },
-  boss_foyer: {
-    id: 'boss_foyer',
-    name: 'BOSS Room Foyer',
-    x: 5.85,
-    z: -3.8,
-    neighbors: ['corridor_north', 'boss_room'],
-  },
-  boss_room: {
-    id: 'boss_room',
-    name: 'BOSS Room',
-    x: 5.55,
-    z: -5.25,
-    neighbors: ['boss_foyer'],
-  },
+const distance = (ax: number, az: number, bx: number, bz: number) =>
+  Math.hypot(bx - ax, bz - az);
 
-  // 3. Clear Open-Floor Arteries (Zero equipment collision)
-  corridor_center: {
-    id: 'corridor_center',
-    name: 'Central Grand Runway',
-    x: 0.0,
-    z: 0.0,
-    neighbors: [
-      'desk_david',
-      'desk_manager',
-      'desk_elena',
-      'desk_researcher',
-      'corridor_west',
-      'corridor_east',
-    ],
-  },
-  corridor_west: {
-    id: 'corridor_west',
-    name: 'West Studio Aisle',
-    x: -2.9,
-    z: 0.0,
-    neighbors: ['corridor_center', 'aisle_north_west', 'aisle_south_west', 'pantry', 'coffee_lounge', 'exit'],
-  },
-  corridor_east: {
-    id: 'corridor_east',
-    name: 'East Studio Aisle',
-    x: 2.9,
-    z: 0.0,
-    neighbors: ['corridor_center', 'aisle_north_east', 'aisle_south_east', 'meeting'],
-  },
-  corridor_north: {
-    id: 'corridor_north',
-    name: 'North Gallery Aisle',
-    x: 0.0,
-    z: -3.8,
-    neighbors: [
-      'aisle_north_west',
-      'aisle_north_east',
-      'whiteboard',
-      'whiteboard_manager',
-      'whiteboard_qa',
-      'whiteboard_researcher',
-      'boss_foyer',
-    ],
-  },
-  corridor_south: {
-    id: 'corridor_south',
-    name: 'South Circulation Aisle',
-    x: 0.0,
-    z: 2.45,
-    neighbors: [
-      'aisle_south_west',
-      'aisle_south_east',
-      'desk_alex',
-      'desk_developer',
-      'desk_alex_review',
-      'desk_maya',
-      'desk_qa',
-    ],
-  },
-  aisle_north_west: {
-    id: 'aisle_north_west',
-    name: 'North-West Junction',
-    x: -2.9,
-    z: -3.8,
-    neighbors: ['corridor_west', 'corridor_north', 'desk_david', 'desk_manager'],
-  },
-  aisle_north_east: {
-    id: 'aisle_north_east',
-    name: 'North-East Junction',
-    x: 2.9,
-    z: -3.8,
-    neighbors: ['corridor_east', 'corridor_north', 'desk_elena', 'desk_researcher'],
-  },
-  aisle_south_west: {
-    id: 'aisle_south_west',
-    name: 'South-West Pantry Junction',
-    x: -2.9,
-    z: 1.8,
-    neighbors: [
-      'corridor_west',
-      'pantry',
-      'coffee_lounge',
-      'corridor_south',
-      'desk_alex',
-      'desk_developer',
-      'desk_alex_review',
-    ],
-  },
-  aisle_south_east: {
-    id: 'aisle_south_east',
-    name: 'South-East Meeting Junction',
-    x: 2.9,
-    z: 1.8,
-    neighbors: ['corridor_east', 'meeting', 'corridor_south', 'desk_maya', 'desk_qa'],
-  },
+/** Whether a straight line between two points stays clear of furniture. */
+const hasClearLine = (
+  ax: number,
+  az: number,
+  bx: number,
+  bz: number,
+  radius = AGENT_RADIUS,
+): boolean => {
+  const span = distance(ax, az, bx, bz);
+  const steps = Math.max(2, Math.ceil(span / 0.25));
+  for (let step = 0; step <= steps; step += 1) {
+    const t = step / steps;
+    if (isInsideObstacle(ax + (bx - ax) * t, az + (bz - az) * t, radius)) {
+      return false;
+    }
+  }
+  return true;
 };
 
 export class WaypointGraph {
-  private waypoints: Record<string, Waypoint>;
-
-  constructor(waypoints = OFFICE_WAYPOINTS) {
-    this.waypoints = waypoints;
-  }
+  private nodes = DESTINATIONS;
 
   findNearestWaypoint(x: number, z: number): string {
-    let closestId = 'corridor_center';
-    let minDistance = Infinity;
-    for (const [id, wp] of Object.entries(this.waypoints)) {
-      const dist = Math.hypot(wp.x - x, wp.z - z);
-      if (dist < minDistance) {
-        minDistance = dist;
-        closestId = id;
+    let closest = 'corridor_center';
+    let best = Infinity;
+
+    for (const destination of Object.values(this.nodes)) {
+      // Only consider routing nodes and destinations, using their first slot
+      // as the representative position.
+      const slot = destination.slots[0];
+      const span = distance(x, z, slot.x, slot.z);
+      if (span < best) {
+        best = span;
+        closest = destination.id;
       }
     }
-    return closestId;
+    return closest;
   }
 
-  findPath(startId: string, goalId: string): Waypoint[] {
-    if (!this.waypoints[startId] || !this.waypoints[goalId]) return [];
-    if (startId === goalId) return [this.waypoints[startId]];
+  /** A* over the destination graph. Returns node ids. */
+  private findNodePath(startId: string, goalId: string): string[] {
+    const start = resolveDestinationId(startId);
+    const goal = resolveDestinationId(goalId);
 
-    const cameFrom = new Map<string, string | null>();
-    cameFrom.set(startId, null);
+    if (start === goal) return [start];
+    if (!this.nodes[start] || !this.nodes[goal]) return [];
 
-    const costSoFar = new Map<string, number>();
-    costSoFar.set(startId, 0);
+    const goalSlot = this.nodes[goal].slots[0];
+    const heuristic = (id: string) => {
+      const slot = this.nodes[id].slots[0];
+      return distance(slot.x, slot.z, goalSlot.x, goalSlot.z);
+    };
 
-    const heuristic = (a: Waypoint, b: Waypoint) =>
-      Math.hypot(b.x - a.x, b.z - a.z);
+    const cameFrom = new Map<string, string | null>([[start, null]]);
+    const costSoFar = new Map<string, number>([[start, 0]]);
+    const frontier: { id: string; priority: number }[] = [
+      { id: start, priority: heuristic(start) },
+    ];
 
-    const priorityQueue = [{ id: startId, priority: 0 }];
+    while (frontier.length > 0) {
+      frontier.sort((a, b) => a.priority - b.priority);
+      const current = frontier.shift()!.id;
+      if (current === goal) break;
 
-    while (priorityQueue.length > 0) {
-      priorityQueue.sort((a, b) => a.priority - b.priority);
-      const current = priorityQueue.shift()!.id;
+      const currentSlot = this.nodes[current].slots[0];
+      for (const nextId of this.nodes[current].neighbors) {
+        const next = this.nodes[nextId];
+        if (!next) continue;
 
-      if (current === goalId) break;
+        const nextSlot = next.slots[0];
+        const cost =
+          (costSoFar.get(current) ?? 0) +
+          distance(currentSlot.x, currentSlot.z, nextSlot.x, nextSlot.z);
 
-      const currentNode = this.waypoints[current];
-      if (!currentNode || !currentNode.neighbors) continue;
-
-      for (const nextId of currentNode.neighbors) {
-        const nextNode = this.waypoints[nextId];
-        if (!nextNode) continue;
-
-        const newCost = (costSoFar.get(current) ?? 0) + heuristic(currentNode, nextNode);
-
-        if (!costSoFar.has(nextId) || newCost < costSoFar.get(nextId)!) {
-          costSoFar.set(nextId, newCost);
-          const priority = newCost + heuristic(nextNode, this.waypoints[goalId]);
-          priorityQueue.push({ id: nextId, priority });
+        if (!costSoFar.has(nextId) || cost < costSoFar.get(nextId)!) {
+          costSoFar.set(nextId, cost);
           cameFrom.set(nextId, current);
+          frontier.push({ id: nextId, priority: cost + heuristic(nextId) });
         }
       }
     }
 
-    if (!cameFrom.has(goalId)) return [];
+    if (!cameFrom.has(goal)) return [];
 
-    const path: Waypoint[] = [];
-    let curr: string | null = goalId;
-    while (curr) {
-      const wp = this.waypoints[curr];
-      if (!wp) break;
-      path.unshift(wp);
-      curr = cameFrom.get(curr) ?? null;
+    const path: string[] = [];
+    let cursor: string | null = goal;
+    while (cursor) {
+      path.unshift(cursor);
+      cursor = cameFrom.get(cursor) ?? null;
     }
-    return path.length > 0 && path[0].id === startId ? path : [];
+    return path[0] === start ? path : [];
+  }
+
+  /**
+   * Route from a live position to a destination slot, then smooth the result.
+   *
+   * Smoothing is what stops movement reading as rail-following: any node that
+   * can be skipped with an unobstructed straight line is dropped.
+   */
+  findPath(
+    fromX: number,
+    fromZ: number,
+    goalId: string,
+    slotId?: string | null,
+  ): PathPoint[] {
+    const goal = resolveDestinationId(goalId);
+    const goalSlot = resolveSlot(goal, slotId);
+
+    // Short circuit: if the destination is directly visible, walk straight to it.
+    if (hasClearLine(fromX, fromZ, goalSlot.x, goalSlot.z)) {
+      return [{ x: goalSlot.x, z: goalSlot.z, id: goalSlot.id }];
+    }
+
+    const startId = this.findNearestWaypoint(fromX, fromZ);
+    const nodeIds = this.findNodePath(startId, goal);
+
+    if (nodeIds.length === 0) {
+      // No route found. Head straight there rather than freezing; obstacle
+      // resolution keeps the body out of furniture on the way.
+      return [{ x: goalSlot.x, z: goalSlot.z, id: goalSlot.id }];
+    }
+
+    const points: PathPoint[] = nodeIds.map((id) => {
+      const slot = id === goal ? goalSlot : this.nodes[id].slots[0];
+      return { x: slot.x, z: slot.z, id: slot.id };
+    });
+
+    // String pulling: keep only the corners that are actually required.
+    const smoothed: PathPoint[] = [];
+    let cursorX = fromX;
+    let cursorZ = fromZ;
+    let index = 0;
+
+    while (index < points.length) {
+      let furthest = index;
+      for (let candidate = points.length - 1; candidate > index; candidate -= 1) {
+        if (hasClearLine(cursorX, cursorZ, points[candidate].x, points[candidate].z)) {
+          furthest = candidate;
+          break;
+        }
+      }
+      const chosen = points[furthest];
+      smoothed.push(chosen);
+      cursorX = chosen.x;
+      cursorZ = chosen.z;
+      index = furthest + 1;
+    }
+
+    return smoothed.length > 0 ? smoothed : points;
   }
 }
 

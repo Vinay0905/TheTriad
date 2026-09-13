@@ -3,7 +3,12 @@
 from typing import Any, Dict, List
 
 from ai_team.config import get_config
+from ai_team.graph.nodes._llm import groq_candidate, openrouter_candidate
 from ai_team.graph.state import TriadCouncilState
+from ai_team.providers.resilience import (
+    AllProvidersUnavailableError,
+    call_with_office_presence,
+)
 
 # Used when the model does not return parseable criteria. Labelled as defaults
 # in the RFC so they are never mistaken for the model's own analysis.
@@ -55,37 +60,36 @@ def manager_rfc_node(state: TriadCouncilState) -> Dict[str, Any]:
     task = state["task_prompt"]
     feedback = state.get("human_feedback")
 
-    content = ""
-    attribution = "defaults"
+    prompt = (
+        "You are the Engineering Manager. Write an architectural RFC for "
+        f"this task:\n{task}\n"
+    )
+    if feedback:
+        prompt += f"\nOPERATOR STEERING GUIDANCE TO INCORPORATE:\n{feedback}\n"
+    prompt += (
+        "\nStructure the response with three headed sections: Approach, "
+        "Assumptions, and Acceptance Criteria. Use '- ' bullets under "
+        "Assumptions and Acceptance Criteria."
+    )
 
+    candidates = []
     if config.openrouter_api_key:
-        try:
-            print(f"  ... [Manager David / {config.openrouter_model}] Drafting RFC...")
-            from langchain_openai import ChatOpenAI
+        candidates.append(openrouter_candidate(config, prompt, max_tokens=1500))
+    if config.groq_api_key:
+        candidates.append(groq_candidate(config, prompt, max_tokens=1500))
 
-            llm = ChatOpenAI(
-                model=config.openrouter_model,
-                base_url="https://openrouter.ai/api/v1",
-                api_key=config.openrouter_api_key,
-                temperature=0.2,
-                request_timeout=30,
-            )
-            prompt = (
-                "You are the Engineering Manager. Write an architectural RFC for "
-                f"this task:\n{task}\n"
-            )
-            if feedback:
-                prompt += f"\nOPERATOR STEERING GUIDANCE TO INCORPORATE:\n{feedback}\n"
-            prompt += (
-                "\nStructure the response with three headed sections: Approach, "
-                "Assumptions, and Acceptance Criteria. Use '- ' bullets under "
-                "Assumptions and Acceptance Criteria."
-            )
-            content = llm.invoke(prompt).content or ""
-            attribution = f"openrouter:{config.openrouter_model}"
-        except Exception as err:
-            print(f"  [Manager David] OpenRouter unavailable: {err}")
-            content = ""
+    try:
+        content, attribution = call_with_office_presence(
+            role="manager_rfc",
+            agent_id="manager",
+            candidates=candidates,
+            on_wait_status="David: provider is rate limiting the RFC; waiting.",
+        )
+        content = content or ""
+    except AllProvidersUnavailableError as err:
+        print(f"  [Manager David] No RFC provider available: {err}")
+        content = ""
+        attribution = "defaults"
 
     parsed = _parse_rfc_sections(content)
     assumptions = parsed["assumptions"] or _DEFAULT_ASSUMPTIONS

@@ -9,7 +9,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Crosshair,
-  Footprints,
 } from 'lucide-react';
 
 
@@ -25,8 +24,6 @@ export const Sidebar: React.FC = () => {
   const setLeftPanelMinimized = useOfficeStore((state) => state.setLeftPanelMinimized);
   const toggleLeftPanel = useOfficeStore((state) => state.toggleLeftPanel);
 
-  const ambientCirculation = useOfficeStore((state) => state.ambientCirculation);
-  const toggleAmbientCirculation = useOfficeStore((state) => state.toggleAmbientCirculation);
   const isRunning = useOfficeStore((state) => state.isRunning);
 
 
@@ -77,16 +74,6 @@ export const Sidebar: React.FC = () => {
           })}
         </div>
 
-        {/* Between-run office-life indicator */}
-        <button
-          onClick={toggleAmbientCirculation}
-          className={`p-2 rounded-lg text-xs font-mono transition-colors ${
-            ambientCirculation ? 'text-emerald-400 bg-emerald-500/20' : 'text-gray-500 bg-surface-container'
-          }`}
-          title={`Between-run office life: ${ambientCirculation ? 'ON' : 'OFF'}`}
-        >
-          <Footprints className="w-4 h-4" />
-        </button>
       </aside>
     );
   }
@@ -249,23 +236,12 @@ export const Sidebar: React.FC = () => {
           </div>
         </div>
 
-        {/* Between-run office-life toggle */}
-        <div className="border-t border-surface-variant/30 pt-3 flex items-center justify-between px-1">
-          <div className="flex items-center gap-1.5 font-mono text-[10px] text-on-surface-variant">
-            <Footprints className="w-3.5 h-3.5 text-primary" />
-            <span>Between-run office life:</span>
-          </div>
-          <button
-            onClick={toggleAmbientCirculation}
-            className={`px-2.5 py-0.5 rounded-full text-[9.5px] font-mono font-bold uppercase transition-all ${
-              ambientCirculation
-                ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40'
-                : 'bg-surface-container text-gray-500 border border-surface-variant/40'
-            }`}
-          >
-            {ambientCirculation ? 'ON' : 'OFF'}
-          </button>
-        </div>
+        {/*
+          The office-life toggle was removed rather than left in place.
+          Ambient behaviour is now decided by the server-side OfficeDirector,
+          which keeps running during a live run, so a browser switch could not
+          actually control it. A control that does nothing is worse than none.
+        */}
       </div>
     </aside>
   );

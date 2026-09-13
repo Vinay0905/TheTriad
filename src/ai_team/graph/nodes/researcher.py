@@ -11,7 +11,12 @@ from typing import Any, Dict, List
 
 from ai_team.config import get_config
 from ai_team.domain.contracts import AgentStatusEvent
+from ai_team.graph.nodes._llm import groq_candidate, openrouter_candidate
 from ai_team.graph.state import TriadCouncilState
+from ai_team.providers.resilience import (
+    AllProvidersUnavailableError,
+    call_with_office_presence,
+)
 from ai_team.spatial.event_bus import get_event_bus
 
 _PROMPT = (
@@ -50,42 +55,42 @@ def researcher_audit_node(state: TriadCouncilState) -> Dict[str, Any]:
     _announce()
 
     citations: List[Dict[str, str]] = []
-    attribution = "none"
-    findings = ""
+    prompt = _PROMPT.format(task=task, summary=rfc.get("summary", ""))
 
+    candidates = []
     if config.groq_researcher_api_key:
-        try:
-            model = config.groq_researcher_model
-            print(f"  ... [Researcher Elena / Groq {model}] Auditing approach...")
-            from langchain_groq import ChatGroq
-
-            llm = ChatGroq(
-                model_name=model,
-                groq_api_key=config.groq_researcher_api_key,
-                temperature=0.2,
+        candidates.append(
+            groq_candidate(
+                config,
+                prompt,
+                model=config.groq_researcher_model,
+                key=config.groq_researcher_api_key,
                 max_tokens=1000,
-                request_timeout=30,
             )
-            findings = (
-                llm.invoke(
-                    _PROMPT.format(task=task, summary=rfc.get("summary", ""))
-                ).content
-                or ""
-            ).strip()
-            attribution = f"groq:{model}"
-            citations.append(
-                {
-                    "title": "Python Standard Library reference (unverified, not fetched)",
-                    "url": "https://docs.python.org/3/library/",
-                }
-            )
-        except Exception as err:
-            print(f"  [Researcher Elena] Groq unavailable: {err}")
+        )
+    if config.openrouter_api_key:
+        candidates.append(openrouter_candidate(config, prompt, max_tokens=1000))
 
-    if not findings:
+    try:
+        findings, attribution = call_with_office_presence(
+            role="researcher_audit",
+            agent_id="researcher",
+            candidates=candidates,
+            on_wait_status="Elena: search provider is rate limiting; waiting to retry.",
+        )
+        findings = (findings or "").strip()
+        citations.append(
+            {
+                "title": "Python Standard Library reference (unverified, not fetched)",
+                "url": "https://docs.python.org/3/library/",
+            }
+        )
+    except AllProvidersUnavailableError as err:
+        attribution = "none"
         findings = (
-            f"No research audit was produced for '{task}'. Proceed on the "
-            "manager's RFC alone and treat dependency choices as unverified."
+            f"No research audit was produced for '{task}' ({'; '.join(err.notes)}). "
+            "Proceed on the manager's RFC alone and treat dependency choices as "
+            "unverified."
         )
 
     return {

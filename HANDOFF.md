@@ -45,16 +45,41 @@ bundle, and the spatial event bus.
   visible to approved code.
 - `success` requires approval **and** sandbox `exit_code == 0`.
 
+**Also now enforced:**
+
+- **Per-run tokens.** `POST /api/tasks/start` mints `secrets.token_urlsafe(32)`,
+  returned once to the caller. Gate responses and downloads require it via
+  `X-Run-Token` (or `?token=` for downloads, since a browser navigation cannot
+  set a header), compared with `hmac.compare_digest`. The token is never logged
+  and never broadcast on the WebSocket.
+- **One behaviour owner.** All choreography lives in
+  `ai_team.spatial.director.OfficeDirector`, an asyncio task with priority
+  arbitration (`PIPELINE_CRITICAL > PROVIDER_STATE > SCHEDULED_BREAK >
+  AMBIENT_IDLE`) and per-destination slot reservation. No `time.sleep()`
+  remains on the graph thread, so animation cannot delay LLM work.
+- **Provider state is visible.** `ai_team.providers.resilience` classifies
+  failures into rate limit (wait, with a countdown in the HUD), quota exhausted
+  (the agent walks out and the role is marked unavailable), auth failure, and
+  hard error. Substitutions are named in the HUD and in the report.
+- **One geometry source.** `frontend/src/components/office/OfficeGeometry.ts`
+  owns furniture boxes and destination slots, with `findGeometryProblems()`
+  asserting no slot sits inside furniture, no two slots share coordinates, and
+  corridors keep clearance. It runs in dev and logs to the console.
+- **Demand rendering.** The canvas uses `frameloop="demand"`, capped `dpr`,
+  a once-baked shadow map, `ContactShadows frames={1}`, three lights instead of
+  ten, and pauses while the tab is hidden. `?perf=1` shows real draw calls.
+
 **Known gaps as of this handoff:**
 
-- Per-run tokens (`/api/gate/respond`, download) are not yet implemented, so the
-  HUD cannot yet authenticate a gate decision. The server binds `127.0.0.1` by
-  default to compensate. The insecure "newest workspace on disk" download
-  fallback has been **removed**, so the TopBar download link 404s until the
-  frontend pass lands.
-- Office choreography is still hardcoded in `server.py` and still sleeps on the
-  worker thread. Replacing it with a server-side `OfficeDirector` is planned.
-- The frontend has not yet been updated for any of the above.
+- The test suite has never been executed; see [TESTING.md](TESTING.md).
+- Tracks B2–B5 are unbuilt: no RED/GREEN theatre, no LangSmith tracing, no
+  time-travel scrubber, no git worktree per run.
+- No navmesh. Collision and occupancy are solved by corrected geometry, slot
+  reservation, separation forces and obstacle resolution; `recast-navigation`
+  was deliberately not added on an untested build.
+- Elena still does not search the web.
+- The run token lives in tab memory, so a refresh mid-run loses the ability to
+  approve from the browser.
 
 ---
 
@@ -439,15 +464,17 @@ These are the routes that actually exist in [`src/ai_team/server.py`](src/ai_tea
 | Endpoint | Method | Payload / Params | Description |
 | :--- | :--- | :--- | :--- |
 | `/api/health` | `GET` | None | Service status, whether the graph is compiled, and the active sandbox backend. |
-| `/api/tasks/start` | `POST` | `{"task": "Build a CSV parser"}` | Starts a run in the background. Returns `{"thread_id", "task", "status"}`. 409 during off-hours. |
-| `/api/gate/respond` | `POST` | `{"thread_id", "action", "guidance"}` | Resumes the suspended graph at the gate. `action` is forwarded verbatim; the gate node interprets it and **fails closed** on anything unrecognized. 404 unknown run, 409 if no gate is waiting. |
-| `/api/runs/{thread_id}` | `GET` | None | Status, approval status, and sandbox exit code for a run. |
-| `/api/runs/{thread_id}/download` | `GET` | None | Streams a ZIP of that run's workspace. 404 if unknown — there is deliberately **no** fallback to another run's files. |
+| `/api/office/providers` | `GET` | None | Live per-role provider state and sandbox availability. This is the HUD's real telemetry source. |
+| `/api/tasks/start` | `POST` | `{"task": "Build a CSV parser"}` | Starts a run. Returns `{"thread_id", "task", "status", "run_token"}`. The token is issued **once**. 409 during off-hours. |
+| `/api/gate/respond` | `POST` | `{"thread_id", "action", "guidance"}` + `X-Run-Token` | Resumes the suspended graph. `action` is forwarded verbatim; the gate node interprets it and **fails closed** on anything unrecognized. 403 bad token, 404 unknown run, 409 if no gate is waiting. |
+| `/api/runs/{thread_id}` | `GET` | `X-Run-Token` or `?token=` | Status, approval status, and sandbox exit code. |
+| `/api/runs/{thread_id}/download` | `GET` | `X-Run-Token` or `?token=` | Streams a ZIP of that run's workspace. 404 if unknown — there is deliberately **no** fallback to another run's files. |
 | `/ws/office` | `WebSocket` | N/A | Broadcasts all spatial and pipeline events. Never carries secrets or run tokens. |
 
-Pending: `/api/gate/respond` and the download route will require a per-run
-token (`X-Run-Token`, compared with `hmac.compare_digest`) issued by
-`/api/tasks/start`. Until then, the loopback bind is the only protection.
+Removed: `/api/task`, `/api/runs/{id}/resume`, `/api/office/state`,
+`/api/office/clock`, and `/api/runs/download/latest`. The last of those
+returned the newest workspace on disk, so any caller could obtain another run's
+files.
 
 ---
 

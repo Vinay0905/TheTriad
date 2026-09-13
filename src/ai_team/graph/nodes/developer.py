@@ -9,12 +9,19 @@ Two rules shape this node:
    makes the pipeline look successful.
 """
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict
 
 from ai_team.config import get_config
 from ai_team.domain.contracts import AgentStatusEvent
 from ai_team.graph.contract_lock import assert_contract_unbroken, frozen_test_source
+from ai_team.graph.nodes._llm import coding_candidates
 from ai_team.graph.state import TriadCouncilState
+from ai_team.providers.resilience import (
+    AllProvidersUnavailableError,
+    InvalidModelOutput,
+    RoleProvider,
+    call_with_office_presence,
+)
 from ai_team.spatial.event_bus import get_event_bus
 from ai_team.utils import (
     extract_python_code,
@@ -45,44 +52,6 @@ _REPAIR_PROMPT = (
 )
 
 
-def _from_groq(prompt: str, config) -> Tuple[str, str]:
-    from langchain_groq import ChatGroq
-
-    llm = ChatGroq(
-        model_name=config.groq_model,
-        groq_api_key=config.groq_api_key,
-        temperature=0.2,
-        max_tokens=2500,
-        request_timeout=30,
-    )
-    return llm.invoke(prompt).content, f"groq:{config.groq_model}"
-
-
-def _from_gemini(prompt: str, config) -> Tuple[str, str]:
-    from google import genai
-
-    client = genai.Client(api_key=config.gemini_api_key)
-    response = client.models.generate_content(
-        model=config.gemini_researcher_model,
-        contents=prompt,
-    )
-    return response.text, f"gemini:{config.gemini_researcher_model}"
-
-
-def _from_openrouter(prompt: str, config) -> Tuple[str, str]:
-    from langchain_openai import ChatOpenAI
-
-    llm = ChatOpenAI(
-        model=config.openrouter_model,
-        base_url="https://openrouter.ai/api/v1",
-        api_key=config.openrouter_api_key,
-        temperature=0.2,
-        max_tokens=2500,
-        request_timeout=35,
-    )
-    return llm.invoke(prompt).content, f"openrouter:{config.openrouter_model}"
-
-
 def _announce(attempts: int) -> None:
     status = (
         "Writing implementation against the frozen contract..."
@@ -95,6 +64,27 @@ def _announce(attempts: int) -> None:
         )
     except Exception as err:  # never let choreography break the pipeline
         print(f"  [Developer] status dispatch skipped: {err}")
+
+
+def _validating(candidate: RoleProvider) -> RoleProvider:
+    """Wrap a candidate so unparseable code moves on to the next provider."""
+
+    def call() -> str:
+        raw = candidate.call()
+        code = repair_truncated_python_code(extract_python_code(raw or ""))
+        if not code.strip():
+            raise InvalidModelOutput("empty implementation")
+        is_valid, syntax_error = validate_python_syntax(code)
+        if not is_valid:
+            raise InvalidModelOutput(f"invalid Python ({syntax_error})")
+        return code
+
+    return RoleProvider(
+        label=candidate.label,
+        provider=candidate.provider,
+        model=candidate.model,
+        call=call,
+    )
 
 
 def developer_node(state: TriadCouncilState) -> Dict[str, Any]:
@@ -119,39 +109,19 @@ def developer_node(state: TriadCouncilState) -> Dict[str, Any]:
             tests=tests,
         )
 
-    providers = []
-    if config.groq_api_key:
-        providers.append(("Groq", _from_groq))
-    if config.gemini_api_key:
-        providers.append(("Gemini", _from_gemini))
-    if config.openrouter_api_key:
-        providers.append(("OpenRouter", _from_openrouter))
+    candidates = [_validating(item) for item in coding_candidates(config, prompt)]
 
-    code: Optional[str] = None
-    attribution = "none"
-    notes = []
-
-    for label, call in providers:
-        try:
-            print(f"  ... [Developer Alex / {label}] Drafting implementation...")
-            raw, attribution_candidate = call(prompt, config)
-        except Exception as err:
-            notes.append(f"{label} unavailable: {err}")
-            continue
-
-        candidate = repair_truncated_python_code(extract_python_code(raw or ""))
-        is_valid, syntax_error = validate_python_syntax(candidate)
-        if is_valid and candidate.strip():
-            code = candidate
-            attribution = attribution_candidate
-            break
-
-        notes.append(f"{label} produced invalid Python: {syntax_error}")
-
-    if code is None:
+    try:
+        code, attribution = call_with_office_presence(
+            role="main.py",
+            agent_id="developer",
+            candidates=candidates,
+            on_wait_status="Alex: provider is rate limiting; waiting before the next attempt.",
+        )
+    except AllProvidersUnavailableError as err:
         # Deliberately no Hello World stub: an empty implementation fails QA,
         # which is the truthful outcome.
-        reason = "; ".join(notes) or "no provider credentials configured"
+        reason = "; ".join(err.notes)
         print(f"  [Developer Alex] No usable implementation produced: {reason}")
         return {
             "synthesized_code": {"main.py": "", "test_main.py": tests},

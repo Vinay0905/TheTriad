@@ -4,7 +4,14 @@ import { OrbitControls, ContactShadows, Html } from '@react-three/drei';
 
 import { useOfficeStore } from '../../store/useOfficeStore';
 import { AgentCharacter } from './AgentCharacter';
-import { OfficeLife } from './OfficeLife';
+import { DeskPlacards } from './DeskPlacards';
+import { findGeometryProblems } from './OfficeGeometry';
+import {
+  PerfOverlay,
+  StaticShadowBake,
+  VisibilityGovernor,
+  perfOverlayEnabled,
+} from './OfficeRenderGovernor';
 
 // ============================================================================
 // STITCH NORDIC STUDIO HUD - 3D ARCHITECTURAL ROOM
@@ -106,16 +113,11 @@ const NorthWall: React.FC<{ position: [number, number, number] }> = ({ position 
               <circleGeometry args={[0.06, 16]} />
               <meshStandardMaterial color="#fffbeb" emissive="#fff4cc" emissiveIntensity={1.8} />
             </mesh>
-            {/* Directed Spotlight onto Whiteboard */}
-            <spotLight
-              position={[0, 0, 0]}
-              target-position={[0, -2.0, -0.25]}
-              intensity={1.2}
-              distance={4.5}
-              angle={Math.PI / 4.5}
-              penumbra={0.4}
-              color="#fffbeb"
-            />
+            {/*
+              The picture light's glow is carried by the fixture's emissive
+              material. A real spotLight here added another light for every
+              fragment in the scene to evaluate, for a decorative highlight.
+            */}
           </group>
         ))}
       </group>
@@ -408,15 +410,8 @@ const DualBenchPod: React.FC<{
             emissiveIntensity={1.4}
           />
         </mesh>
-        {/* Downward Desk Illumination Spotlight */}
-        <spotLight
-          position={[0, -0.05, 0]}
-          intensity={2.2}
-          distance={5}
-          angle={Math.PI / 3}
-          penumbra={0.4}
-          color="#fffbeb"
-        />
+        {/* Desk glow is emissive on the lamp itself; this pod is instantiated
+            twice, so a light here cost two of the scene's light slots. */}
       </group>
 
       {/* --- LEFT SLOT (e.g., David or Alex) --- */}
@@ -590,7 +585,7 @@ const BossRoom: React.FC = () => {
           <div className="font-mono text-[10px] font-bold tracking-[0.22em] text-[#d8b778] whitespace-nowrap">BOSS</div>
         </Html>
       </group>
-      <pointLight position={[-0.2, 3.2, 0.2]} intensity={1.05} color="#f6dfae" distance={5.5} />
+      {/* Boss room warmth comes from the emissive fixture, not a live light. */}
     </group>
   );
 };
@@ -661,15 +656,7 @@ const EspressoPantry: React.FC<{ position: [number, number, number] }> = ({ posi
           <sphereGeometry args={[0.06, 12, 12]} />
           <meshStandardMaterial color="#fef3c7" emissive="#f59e0b" emissiveIntensity={2.0} />
         </mesh>
-        <spotLight
-          position={[0, -0.12, 0]}
-          target-position={[0, -1.6, 0]}
-          intensity={1.8}
-          distance={4.5}
-          angle={Math.PI / 3}
-          penumbra={0.5}
-          color="#fef3c7"
-        />
+        {/* Pantry pendant glow is emissive on the shade. */}
       </group>
     </group>
   );
@@ -711,16 +698,7 @@ const RoundMeetingTable: React.FC<{ position: [number, number, number] }> = ({ p
           <sphereGeometry args={[0.08, 16, 16]} />
           <meshStandardMaterial color="#fffbeb" emissive="#fef3c7" emissiveIntensity={2.2} />
         </mesh>
-        {/* Warm Spotlight on table */}
-        <spotLight
-          position={[0, -1.74, 0]}
-          target-position={[0, 0, 0]}
-          intensity={2.4}
-          distance={5.5}
-          angle={Math.PI / 3.5}
-          penumbra={0.4}
-          color="#fef3c7"
-        />
+        {/* Meeting pendant glow is emissive on the shade. */}
       </group>
     </group>
   );
@@ -731,6 +709,19 @@ export const OfficeCanvas: React.FC = () => {
 
   const isDraggingAgent = useOfficeStore((state) => state.isDraggingAgent);
   const controlsRef = React.useRef<any>(null);
+  // Read once: the overlay is a dev aid toggled by URL, not reactive state.
+  const showPerfOverlay = React.useMemo(() => perfOverlayEnabled(), []);
+
+  // The geometry module claims no destination sits inside furniture and every
+  // corridor is wide enough. Assert it at startup in dev rather than trusting
+  // the comment, which is how the old waypoint table drifted out of sync.
+  React.useEffect(() => {
+    if (!import.meta.env.DEV) return;
+    const problems = findGeometryProblems();
+    if (problems.length > 0) {
+      console.error('[OfficeGeometry] layout problems:\n - ' + problems.join('\n - '));
+    }
+  }, []);
 
   // Free Roam Zoom In/Out helper
   const handleZoom = (factor: number) => {
@@ -798,20 +789,37 @@ export const OfficeCanvas: React.FC = () => {
 
       <Canvas
         shadows
+        /*
+         * Demand rendering. The office is static most of the time, so drawing
+         * it continuously was pure heat: agents call invalidate() while they
+         * are actually moving and the loop goes quiet otherwise. Seeing 0 fps
+         * in the perf overlay while nothing moves is the correct result.
+         */
+        frameloop="demand"
+        /*
+         * Retina reports devicePixelRatio 2, which is four times the pixels of
+         * 1x. Capping at 1.5 is a large fill-rate saving for a difference that
+         * is hard to see at this art style.
+         */
+        dpr={[1, 1.5]}
         camera={{ position: [10, 13, 14], fov: 32 }}
         className="w-full h-full cursor-grab active:cursor-grabbing"
       >
-        {/* Warm Sunlight & Stellar Radiance Illumination */}
-        <ambientLight intensity={0.9} color="#fff8ed" />
+        {/*
+          Light count matters: meshStandardMaterial evaluates every light for
+          every fragment. This was ten lights, five of them decorative. The
+          decorative glow is now emissive material on the props themselves.
+        */}
+        <ambientLight intensity={1.05} color="#fff8ed" />
 
-        {/* Primary Radiant Sunlight / Star Light from East Window Wall */}
         <directionalLight
           position={[12, 16, 7]}
-          intensity={3.4}
+          intensity={3.2}
           color="#fff5db"
           castShadow
-          shadow-mapSize-width={2048}
-          shadow-mapSize-height={2048}
+          /* 1024 is ample for a single static bake. */
+          shadow-mapSize-width={1024}
+          shadow-mapSize-height={1024}
           shadow-camera-far={40}
           shadow-camera-near={0.5}
           shadow-camera-left={-10}
@@ -822,15 +830,21 @@ export const OfficeCanvas: React.FC = () => {
           shadow-normalBias={0.02}
         />
 
-        {/* Overhead Atrium Studio Downlight */}
-        <pointLight position={[0, 8.5, 0]} intensity={1.6} color="#fffbeb" distance={22} />
-
-        {/* Studio Warm Rim Highlights */}
-        <pointLight position={[-4.8, 4.5, 3.4]} intensity={1.1} color="#67e8f9" distance={12} />
-        <pointLight position={[4.8, 4.0, 3.4]} intensity={1.3} color="#fde68a" distance={12} />
+        {/* One fill light for the room, replacing three decorative point lights. */}
+        <pointLight position={[0, 8.5, 0]} intensity={1.8} color="#fffbeb" distance={24} />
 
         <Suspense fallback={null}>
-          <OfficeLife />
+          {/*
+            Office behaviour is owned by the server-side OfficeDirector. The
+            previous <OfficeLife /> component ran its own routine loop in the
+            browser and disabled itself whenever a run was active, which
+            removed all ambient life at exactly the moment there was something
+            to watch.
+          */}
+          <StaticShadowBake />
+          <VisibilityGovernor />
+          {showPerfOverlay && <PerfOverlay />}
+
           {/* 1. Oak Parquet Floor */}
           <ParquetFloor />
 
@@ -875,14 +889,22 @@ export const OfficeCanvas: React.FC = () => {
             <AgentCharacter key={agent.id} agent={agent} />
           ))}
 
-          {/* Soft Ground Contact Shadows */}
+          {/* Why an absent desk is empty, rather than just fewer people. */}
+          <DeskPlacards />
+
+          {/*
+            frames={1} bakes the contact shadow once. Without it drei
+            re-rendered a depth pass plus two blur passes into a 1024² target
+            every frame, for a floor and furniture that never move.
+          */}
           <ContactShadows
             position={[0, 0, 0]}
+            frames={1}
             opacity={0.7}
             scale={20}
             blur={1.8}
             far={10}
-            resolution={1024}
+            resolution={512}
             color="#070a10"
           />
 

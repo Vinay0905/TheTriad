@@ -1,8 +1,21 @@
-"""FastAPI server: WebSocket office hub plus the LangGraph run driver."""
+"""FastAPI server: WebSocket office hub plus the LangGraph run driver.
+
+Two responsibilities, kept apart on purpose:
+
+- Driving the graph and reporting where it halted. Every halt is either the
+  human gate (broadcast the gate) or the end (broadcast the outcome).
+- Serving the office. All choreography belongs to the `OfficeDirector`, so
+  this module emits semantic events and never sleeps for animation.
+
+Access control is a per-run token. This is not multi-user auth; it stops a
+stray browser tab from approving or downloading a run it did not start, on a
+server bound to loopback.
+"""
 
 import asyncio
+import hmac
 import io
-import time
+import secrets
 import uuid
 import zipfile
 from contextlib import asynccontextmanager
@@ -10,22 +23,34 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 from zipfile import ZipFile
 
-from fastapi import BackgroundTasks, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from ai_team.config import get_config
 from ai_team.domain.contracts import (
-    AgentMoveEvent,
     AgentStatusEvent,
     OfficeClockEvent,
     ProjectCompletedEvent,
+    ProviderHealthEvent,
     WhiteboardGateEvent,
 )
 from ai_team.execution.bundle import bundle_file_list
+from ai_team.execution.sandbox import sandbox_status
 from ai_team.graph.builder import GATE_NODE, build_triad_graph
 from ai_team.persistence.checkpointer import open_checkpointer
+from ai_team.persistence.redaction import redact_secrets
+from ai_team.providers.resilience import get_provider_health
+from ai_team.spatial.director import get_director
 from ai_team.spatial.event_bus import get_event_bus
 from ai_team.spatial.office_clock import OfficeClock
 
@@ -33,6 +58,7 @@ ACTIVE_RUNS: Dict[str, Dict[str, Any]] = {}
 event_bus = get_event_bus()
 config = get_config()
 office_clock = OfficeClock()
+director = get_director(office_clock)
 
 # Set during lifespan startup. The graph must be built inside the checkpointer
 # context, so it cannot be a module-level constant.
@@ -41,9 +67,7 @@ _graph = None
 
 def get_graph():
     if _graph is None:
-        raise HTTPException(
-            status_code=503, detail="The council graph is not ready yet."
-        )
+        raise HTTPException(status_code=503, detail="The council graph is not ready yet.")
     return _graph
 
 
@@ -58,7 +82,10 @@ async def lifespan(app: FastAPI):
     global _graph
 
     event_bus.set_main_loop(asyncio.get_running_loop())
-    clock_task = asyncio.create_task(broadcast_office_clock())
+    tasks = [
+        asyncio.create_task(broadcast_office_clock()),
+        asyncio.create_task(director.run()),
+    ]
 
     with open_checkpointer(config.runs_dir / "checkpoints.db", durable=True) as saver:
         _graph = build_triad_graph(checkpointer=saver)
@@ -67,11 +94,13 @@ async def lifespan(app: FastAPI):
             yield
         finally:
             _graph = None
-            clock_task.cancel()
-            try:
-                await clock_task
-            except asyncio.CancelledError:
-                pass
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                try:
+                    await task
+                except asyncio.CancelledError:
+                    pass
 
 
 app = FastAPI(title="TriadCouncil: Virtual AI Office Server", lifespan=lifespan)
@@ -85,6 +114,32 @@ app.add_middleware(
 )
 
 
+# ---------------------------------------------------------------------------
+# Run tokens
+# ---------------------------------------------------------------------------
+
+
+def _require_run(thread_id: str) -> Dict[str, Any]:
+    run = ACTIVE_RUNS.get(thread_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Unknown run.")
+    return run
+
+
+def _authorize(thread_id: str, presented: Optional[str]) -> Dict[str, Any]:
+    """Constant-time check that the caller started this run."""
+    run = _require_run(thread_id)
+    expected = run.get("run_token") or ""
+    if not presented or not hmac.compare_digest(str(presented), expected):
+        raise HTTPException(status_code=403, detail="Invalid or missing run token.")
+    return run
+
+
+# ---------------------------------------------------------------------------
+# Clock and health broadcasting
+# ---------------------------------------------------------------------------
+
+
 def clock_event() -> OfficeClockEvent:
     snapshot = office_clock.snapshot()
     return OfficeClockEvent(
@@ -95,57 +150,31 @@ def clock_event() -> OfficeClockEvent:
     )
 
 
+def provider_health_event() -> ProviderHealthEvent:
+    """Real backend health, replacing the old hardcoded 'NODES: 4/4 LIVE'."""
+    available, _detail = sandbox_status()
+    return ProviderHealthEvent(
+        roles=get_provider_health().snapshot(),
+        sandbox_available=available,
+        sandbox_backend=config.sandbox_backend,
+    )
+
+
 async def broadcast_office_clock() -> None:
-    """Keep all tabs in sync and announce shift changes once per transition."""
-    previous_phase: Optional[str] = None
+    """Keep all tabs in sync.
+
+    Shift-change choreography belongs to the Director, so this only publishes
+    time. The interval is deliberately coarse: the browser interpolates between
+    ticks, and frequent timer wakeups are what stop a laptop CPU idling.
+    """
     while True:
-        event = clock_event()
-        event_bus.dispatch(event)
+        event_bus.dispatch(clock_event())
+        await asyncio.sleep(5)
 
-        if event.phase != previous_phase:
-            if event.phase == "OFF_HOURS":
-                for agent_id in ("manager", "researcher", "developer", "qa"):
-                    event_bus.dispatch(
-                        AgentStatusEvent(
-                            agent_id=agent_id,
-                            status_text="Clocking out for the day...",
-                            animation="Walk",
-                        )
-                    )
-                    event_bus.dispatch(
-                        AgentMoveEvent(
-                            agent_id=agent_id,
-                            from_node="corridor_west",
-                            to_node="exit",
-                            action="Walk",
-                        )
-                    )
-            elif previous_phase == "OFF_HOURS":
-                for agent_id, desk in {
-                    "manager": "desk_david",
-                    "researcher": "desk_elena",
-                    "developer": "desk_alex",
-                    "qa": "desk_maya",
-                }.items():
-                    event_bus.dispatch(
-                        AgentStatusEvent(
-                            agent_id=agent_id,
-                            status_text="Arriving for a new day...",
-                            animation="Walk",
-                        )
-                    )
-                    event_bus.dispatch(
-                        AgentMoveEvent(
-                            agent_id=agent_id,
-                            from_node="exit",
-                            to_node=desk,
-                            action="Walk",
-                        )
-                    )
 
-            previous_phase = event.phase
-
-        await asyncio.sleep(1)
+# ---------------------------------------------------------------------------
+# Requests
+# ---------------------------------------------------------------------------
 
 
 class StartTaskRequest(BaseModel):
@@ -156,6 +185,7 @@ class GateResponseRequest(BaseModel):
     thread_id: str
     action: str  # "approve" | "abort" | "steer"; anything else aborts
     guidance: Optional[str] = None
+    run_token: Optional[str] = None
 
 
 @app.get("/api/health")
@@ -168,35 +198,29 @@ async def health():
     }
 
 
+@app.get("/api/office/providers")
+async def office_providers():
+    """Live provider and sandbox availability, for honest HUD telemetry."""
+    event = provider_health_event()
+    _available, detail = sandbox_status()
+    return {
+        "roles": [role.model_dump() for role in event.roles],
+        "sandbox_available": event.sandbox_available,
+        "sandbox_backend": event.sandbox_backend,
+        "sandbox_detail": detail,
+    }
+
+
 @app.websocket("/ws/office")
 async def office_websocket(websocket: WebSocket):
     await event_bus.connect(websocket)
     try:
-        initial_clock = clock_event()
-        await websocket.send_json(initial_clock.model_dump())
-        if initial_clock.phase == "OFF_HOURS":
-            # A reloaded browser did not witness the original clock-out event;
-            # give it the same exit choreography before hiding the team.
-            for agent_id in ("manager", "researcher", "developer", "qa"):
-                await websocket.send_json(
-                    AgentStatusEvent(
-                        agent_id=agent_id,
-                        status_text="Clocked out for the day...",
-                        animation="Walk",
-                    ).model_dump()
-                )
-                await websocket.send_json(
-                    AgentMoveEvent(
-                        agent_id=agent_id,
-                        from_node="corridor_west",
-                        to_node="exit",
-                        action="Walk",
-                    ).model_dump()
-                )
+        await websocket.send_json(clock_event().model_dump())
+        await websocket.send_json(provider_health_event().model_dump())
         await websocket.send_json(
             AgentStatusEvent(
                 agent_id="manager",
-                status_text="David: Standing by for user objective...",
+                status_text="David: Standing by for an objective.",
                 animation="Sit",
             ).model_dump()
         )
@@ -204,189 +228,14 @@ async def office_websocket(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         event_bus.disconnect(websocket)
+    except Exception as err:
+        print(f"  [Server] WebSocket closed: {err}")
+        event_bus.disconnect(websocket)
 
 
 # ---------------------------------------------------------------------------
-# Office choreography
-#
-# NOTE: this is still hardcoded against node names and still sleeps on the
-# worker thread. Replacing it with a server-side OfficeDirector that owns
-# arbitration and slot reservation is tracked as a separate change; it is left
-# intact here so this pass stays focused on the safety path.
+# Graph driver
 # ---------------------------------------------------------------------------
-
-
-def _choreograph(node_name: str, pacing: Dict[str, float]) -> None:
-    if node_name == "manager_rfc_node":
-        pacing["manager_away_until"] = time.monotonic() + 7
-        event_bus.dispatch(
-            AgentStatusEvent(
-                agent_id="manager",
-                status_text="David: Taking a brief air break - reports will wait.",
-                animation="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentMoveEvent(
-                agent_id="manager", from_node="desk_david", to_node="exit", action="Walk"
-            )
-        )
-        event_bus.dispatch(
-            AgentMoveEvent(
-                agent_id="researcher",
-                from_node="coffee_lounge",
-                to_node="desk_elena",
-                action="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentStatusEvent(
-                agent_id="researcher",
-                status_text="Elena: Investigating technical approach & dependencies...",
-                animation="Type",
-            )
-        )
-    elif node_name == "researcher_audit_node":
-        remaining = max(0.0, pacing.get("manager_away_until", 0.0) - time.monotonic())
-        if remaining:
-            event_bus.dispatch(
-                AgentStatusEvent(
-                    agent_id="researcher",
-                    status_text="Elena: Research is ready - waiting for David to return.",
-                    animation="Sit",
-                )
-            )
-            time.sleep(remaining)
-
-        event_bus.dispatch(
-            AgentStatusEvent(
-                agent_id="manager",
-                status_text="David: Back from air break; ready for reports.",
-                animation="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentMoveEvent(
-                agent_id="manager", from_node="exit", to_node="desk_david", action="Walk"
-            )
-        )
-        time.sleep(2.5)
-        event_bus.dispatch(
-            AgentMoveEvent(
-                agent_id="researcher",
-                from_node="desk_elena",
-                to_node="whiteboard",
-                action="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentStatusEvent(
-                agent_id="researcher",
-                status_text="Elena: Sharing verified research at the whiteboard...",
-                animation="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentStatusEvent(
-                agent_id="developer",
-                status_text="Alex: Translating research into a TDD contract...",
-                animation="Type",
-            )
-        )
-    elif node_name == "tdd_contract_node":
-        event_bus.dispatch(
-            AgentMoveEvent(
-                agent_id="developer",
-                from_node="whiteboard",
-                to_node="desk_alex",
-                action="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentStatusEvent(
-                agent_id="developer",
-                status_text="Alex: Implementing main.py at dual screens...",
-                animation="Type",
-            )
-        )
-        event_bus.dispatch(
-            AgentMoveEvent(
-                agent_id="researcher",
-                from_node="whiteboard",
-                to_node="desk_elena",
-                action="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentStatusEvent(
-                agent_id="researcher",
-                status_text="Elena: Monitoring API specifications...",
-                animation="Sit",
-            )
-        )
-    elif node_name == "developer_node":
-        event_bus.dispatch(
-            AgentMoveEvent(
-                agent_id="qa",
-                from_node="desk_maya",
-                to_node="desk_alex_review",
-                action="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentStatusEvent(
-                agent_id="qa",
-                status_text="Maya: Scrutinizing edge cases & race conditions...",
-                animation="Type",
-            )
-        )
-    elif node_name == "qa_audit_node":
-        event_bus.dispatch(
-            AgentMoveEvent(
-                agent_id="qa",
-                from_node="desk_alex_review",
-                to_node="whiteboard_qa",
-                action="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentStatusEvent(
-                agent_id="qa",
-                status_text="Maya: Presenting QA findings for approval...",
-                animation="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentMoveEvent(
-                agent_id="manager",
-                from_node="desk_david",
-                to_node="whiteboard_manager",
-                action="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentStatusEvent(
-                agent_id="manager",
-                status_text="David: Calling team to Whiteboard for approval...",
-                animation="Sit",
-            )
-        )
-    elif node_name == "sandbox_execution_node":
-        event_bus.dispatch(
-            AgentMoveEvent(
-                agent_id="developer",
-                from_node="whiteboard",
-                to_node="desk_alex",
-                action="Walk",
-            )
-        )
-        event_bus.dispatch(
-            AgentStatusEvent(
-                agent_id="developer",
-                status_text="Alex: Running the approved tests in the sandbox...",
-                animation="Type",
-            )
-        )
 
 
 def _broadcast_gate(thread_id: str, bundle: Dict[str, Any]) -> None:
@@ -394,9 +243,10 @@ def _broadcast_gate(thread_id: str, bundle: Dict[str, Any]) -> None:
 
     This lives here rather than in the gate node because `interrupt()` re-runs
     its node from the top on resume, so a dispatch inside the node fires again
-    on every resume.
+    on every resume. The token is never included in this payload.
     """
     print(f"  [Server] Halted at the human gate for {thread_id}.")
+    director.note_gate_open()
     event_bus.dispatch(
         WhiteboardGateEvent(
             thread_id=thread_id,
@@ -410,13 +260,6 @@ def _broadcast_gate(thread_id: str, bundle: Dict[str, Any]) -> None:
             gate_kind="EXECUTE",
         )
     )
-    event_bus.dispatch(
-        AgentStatusEvent(
-            agent_id="manager",
-            status_text="Waiting for human approval at the whiteboard...",
-            animation="Sit",
-        )
-    )
 
 
 def _broadcast_completion(thread_id: str, values: Dict[str, Any]) -> None:
@@ -425,31 +268,15 @@ def _broadcast_completion(thread_id: str, values: Dict[str, Any]) -> None:
     sandbox = values.get("sandbox_result") or {}
     exit_code = sandbox.get("exit_code")
 
-    # Approval alone is not success. Tests must actually have passed.
+    # Approval alone is not success. The tests must actually have passed.
     success = approval == "APPROVED" and exit_code == 0
 
-    event_bus.dispatch(
-        AgentMoveEvent(
-            agent_id="qa", from_node="whiteboard", to_node="desk_maya", action="Walk"
-        )
-    )
-    event_bus.dispatch(
-        AgentStatusEvent(
-            agent_id="manager",
-            status_text="David: Delivering the outcome to BOSS room...",
-            animation="Walk",
-        )
-    )
-    event_bus.dispatch(
-        AgentMoveEvent(
-            agent_id="manager", from_node="whiteboard", to_node="boss_room", action="Walk"
-        )
-    )
+    director.note_run_finished()
     event_bus.dispatch(
         ProjectCompletedEvent(
             thread_id=thread_id,
             success=success,
-            summary=values.get("final_status_report") or "No report was produced.",
+            summary=redact_secrets(values.get("final_status_report") or "No report."),
             approval_status=approval,
             exit_code=exit_code,
             failing_tests_count=sandbox.get("failing_tests_count", 0),
@@ -470,12 +297,12 @@ def _drive_graph(thread_id: str, task: str, resume: Optional[Dict[str, Any]] = N
     Used for both the initial run and every resume, so steering back into the
     council cannot be mistaken for delivery.
     """
-    graph = get_graph()
-    graph_config = {
-        "configurable": {"thread_id": thread_id},
-        "recursion_limit": 50,
-    }
-    pacing: Dict[str, float] = {}
+    graph = _graph
+    if graph is None:
+        print("  [Server] Graph unavailable; run aborted.")
+        return
+
+    graph_config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 50}
 
     if resume is None:
         stream_input: Any = {"task_prompt": task}
@@ -490,7 +317,9 @@ def _drive_graph(thread_id: str, task: str, resume: Optional[Dict[str, Any]] = N
                 if node_name.startswith("__"):
                     continue
                 print(f"  [Server] Node finished: {node_name}")
-                _choreograph(node_name, pacing)
+                # Semantic only. The Director decides who moves, on its own
+                # timeline, so animation never delays the pipeline.
+                director.note_node_finished(node_name)
 
         snapshot = graph.get_state(graph_config)
 
@@ -509,10 +338,23 @@ def _drive_graph(thread_id: str, task: str, resume: Optional[Dict[str, Any]] = N
         _broadcast_completion(thread_id, snapshot.values)
     except Exception as err:
         print(f"  [Server] Run {thread_id} failed: {err}")
+        director.note_run_finished()
         run = ACTIVE_RUNS.get(thread_id)
         if run is not None:
             run["status"] = "ERROR"
-            run["error"] = str(err)
+            run["error"] = redact_secrets(str(err))
+        event_bus.dispatch(
+            ProjectCompletedEvent(
+                thread_id=thread_id,
+                success=False,
+                summary=(
+                    "The run failed before completing.\n\n"
+                    f"{redact_secrets(str(err))}"
+                ),
+                approval_status=None,
+                exit_code=None,
+            )
+        )
 
 
 @app.post("/api/tasks/start")
@@ -529,57 +371,52 @@ async def start_task(request: StartTaskRequest, background_tasks: BackgroundTask
         )
 
     thread_id = f"thread_{uuid.uuid4().hex[:8]}"
-    ACTIVE_RUNS[thread_id] = {"task": task, "status": "RUNNING"}
+    run_token = secrets.token_urlsafe(32)
+    # Returned once, to the caller that started the run. Never logged and never
+    # broadcast over the WebSocket.
+    ACTIVE_RUNS[thread_id] = {
+        "task": task,
+        "status": "RUNNING",
+        "run_token": run_token,
+    }
 
     event_bus.dispatch(
         AgentStatusEvent(
             agent_id="manager",
-            status_text="David: Scoping objective & architectural requirements...",
+            status_text="David: Scoping the objective and acceptance criteria...",
             animation="Type",
-        )
-    )
-    event_bus.dispatch(
-        AgentMoveEvent(
-            agent_id="manager", from_node="whiteboard", to_node="desk_david", action="Walk"
-        )
-    )
-    event_bus.dispatch(
-        AgentStatusEvent(
-            agent_id="researcher",
-            status_text="Elena: Preparing documentation search...",
-            animation="Sit",
         )
     )
 
     background_tasks.add_task(_drive_graph, thread_id, task, None)
 
-    return {"thread_id": thread_id, "task": task, "status": "STARTED"}
+    return {
+        "thread_id": thread_id,
+        "task": task,
+        "status": "STARTED",
+        "run_token": run_token,
+    }
 
 
 @app.post("/api/gate/respond")
-async def respond_to_gate(request: GateResponseRequest, background_tasks: BackgroundTasks):
+async def respond_to_gate(
+    request: GateResponseRequest,
+    background_tasks: BackgroundTasks,
+    x_run_token: Optional[str] = Header(default=None, alias="X-Run-Token"),
+):
     graph = get_graph()
     thread_id = request.thread_id
 
-    if thread_id not in ACTIVE_RUNS:
-        raise HTTPException(status_code=404, detail="Unknown run.")
+    _authorize(thread_id, x_run_token or request.run_token)
 
-    graph_config = {
-        "configurable": {"thread_id": thread_id},
-        "recursion_limit": 50,
-    }
+    graph_config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 50}
     snapshot = graph.get_state(graph_config)
     if not snapshot.next or GATE_NODE not in snapshot.next:
-        raise HTTPException(
-            status_code=409, detail="No gate is currently awaiting a decision."
-        )
+        raise HTTPException(status_code=409, detail="No gate is awaiting a decision.")
 
     # The raw action is forwarded verbatim. The gate node owns interpretation
     # and fails closed on anything it does not recognise.
-    resume_payload = {
-        "action": request.action,
-        "guidance": request.guidance or "",
-    }
+    resume_payload = {"action": request.action, "guidance": request.guidance or ""}
 
     background_tasks.add_task(
         _drive_graph, thread_id, ACTIVE_RUNS[thread_id].get("task", ""), resume_payload
@@ -589,10 +426,12 @@ async def respond_to_gate(request: GateResponseRequest, background_tasks: Backgr
 
 
 @app.get("/api/runs/{thread_id}")
-async def get_run(thread_id: str):
-    run = ACTIVE_RUNS.get(thread_id)
-    if run is None:
-        raise HTTPException(status_code=404, detail="Unknown run.")
+async def get_run(
+    thread_id: str,
+    x_run_token: Optional[str] = Header(default=None, alias="X-Run-Token"),
+    token: Optional[str] = Query(default=None),
+):
+    run = _authorize(thread_id, x_run_token or token)
     return {
         "thread_id": thread_id,
         "status": run.get("status"),
@@ -603,17 +442,25 @@ async def get_run(thread_id: str):
 
 
 @app.get("/api/runs/{thread_id}/download")
-async def download_run_files(thread_id: str):
+async def download_run_files(
+    thread_id: str,
+    x_run_token: Optional[str] = Header(default=None, alias="X-Run-Token"),
+    token: Optional[str] = Query(default=None),
+):
     """Stream the workspace for a specific run.
 
-    There is deliberately no "newest run on disk" fallback: guessing meant an
-    unknown thread id could be handed another run's files.
+    The token may arrive as a query parameter because a browser download is a
+    plain navigation and cannot set headers. There is deliberately no "newest
+    run on disk" fallback: guessing meant an unknown thread id could be handed
+    another run's files.
     """
-    run = ACTIVE_RUNS.get(thread_id)
-    if run is None or not run.get("workspace_path"):
+    run = _authorize(thread_id, x_run_token or token)
+
+    workspace_path = run.get("workspace_path")
+    if not workspace_path:
         raise HTTPException(status_code=404, detail="No workspace for this run.")
 
-    workspace = Path(run["workspace_path"])
+    workspace = Path(workspace_path)
     if not workspace.exists():
         raise HTTPException(status_code=404, detail="No workspace for this run.")
 
@@ -631,9 +478,7 @@ async def download_run_files(thread_id: str):
         buffer,
         media_type="application/zip",
         headers={
-            "Content-Disposition": (
-                f"attachment; filename=triadcouncil-{safe_thread_id}.zip"
-            )
+            "Content-Disposition": f"attachment; filename=triadcouncil-{safe_thread_id}.zip"
         },
     )
 
@@ -648,7 +493,7 @@ def main():
         port=config.server_port,
         app_dir=src_dir,
         # Off by default: the reloader runs a filesystem watcher for the life
-        # of the process. Enable with AI_TEAM_SERVER_RELOAD=1 when developing.
+        # of the process.
         reload=config.server_reload,
         reload_dirs=[str(Path(src_dir) / "src")] if config.server_reload else None,
     )

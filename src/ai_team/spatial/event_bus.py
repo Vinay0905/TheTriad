@@ -1,28 +1,47 @@
-"""Asynchronous & Thread-Safe Event Bus broadcasting spatial and state events to connected WebSockets."""
+"""Thread-safe event bus broadcasting office and pipeline events to WebSockets."""
 
 import asyncio
 import json
 import sqlite3
-import time
+import threading
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set
+
 from fastapi import WebSocket
+
 from ai_team.domain.contracts import OfficeEvent
+from ai_team.persistence.redaction import redact_secrets
+
+# High-frequency, low-value events. Persisting these opened a SQLite
+# connection per frame and gave the audit log nothing useful.
+_EPHEMERAL_EVENTS: Set[str] = {
+    "OFFICE_CLOCK",
+    "OFFICE_SCHEDULE_TICK",
+    "AGENT_MOVE",
+    "AGENT_STATUS",
+    "PROVIDER_HEALTH",
+}
 
 
 class OfficeEventBus:
-    """Manages connected 3D clients and persists events to an append-only SQLite log."""
+    """Manages connected clients and persists decision-relevant events."""
 
     def __init__(self, db_path: Optional[Path] = None):
         self.active_websockets: List[WebSocket] = []
         self.db_path = db_path or Path(".runs/events.db")
         self.main_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._db_lock = threading.Lock()
+        self._conn: Optional[sqlite3.Connection] = None
         self._init_db()
 
-    def _init_db(self):
+    def _init_db(self) -> None:
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        with sqlite3.connect(self.db_path) as conn:
-            conn.execute(
+        try:
+            # One long-lived connection instead of one per event. WAL keeps the
+            # append from blocking readers.
+            self._conn = sqlite3.connect(self.db_path, check_same_thread=False)
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS office_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -32,64 +51,69 @@ class OfficeEventBus:
                 )
                 """
             )
+            self._conn.commit()
+        except Exception as err:
+            print(f"[EventBus] Persistence unavailable, continuing in memory: {err}")
+            self._conn = None
 
-    def set_main_loop(self, loop: asyncio.AbstractEventLoop):
+    def set_main_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self.main_loop = loop
 
-    async def connect(self, websocket: WebSocket):
+    async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
         self.active_websockets.append(websocket)
 
-    def disconnect(self, websocket: WebSocket):
+    def disconnect(self, websocket: WebSocket) -> None:
         if websocket in self.active_websockets:
             self.active_websockets.remove(websocket)
 
-    def dispatch(self, event: OfficeEvent):
-        """
-        Thread-safe synchronous dispatcher.
-        Can be called from ANY worker thread or LangGraph node without crashing.
-        """
+    def dispatch(self, event: OfficeEvent) -> None:
+        """Fire and forget from any thread, including LangGraph worker threads."""
         if self.main_loop and self.main_loop.is_running():
             asyncio.run_coroutine_threadsafe(self.broadcast(event), self.main_loop)
-        else:
-            try:
-                loop = asyncio.get_event_loop()
-                if loop.is_running():
-                    loop.create_task(self.broadcast(event))
-                else:
-                    loop.run_until_complete(self.broadcast(event))
-            except Exception as e:
-                print(f"[EventBus Dispatch Warning] {e}")
+            return
 
-    async def broadcast(self, event: OfficeEvent):
-        """Persist to SQLite and broadcast JSON to all connected browser clients."""
-        payload_dict = event.model_dump()
-        payload_json = json.dumps(payload_dict)
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(self.broadcast(event))
+            else:
+                loop.run_until_complete(self.broadcast(event))
+        except Exception as err:
+            print(f"[EventBus] Dispatch skipped: {err}")
 
-        # 1. Append-only persistence (skip high-frequency 1s clock ticks to prevent DB lock/thrashing)
-        if event.event_type != "OFFICE_CLOCK":
-            try:
-                with sqlite3.connect(self.db_path) as conn:
-                    conn.execute(
-                        "INSERT INTO office_events (timestamp, event_type, payload) VALUES (?, ?, ?)",
-                        (event.timestamp, event.event_type, payload_json),
-                    )
-            except Exception as e:
-                print(f"[EventBus Error] Failed to log event to SQLite: {e}")
+    def _persist(self, event: OfficeEvent, payload_json: str) -> None:
+        if self._conn is None or event.event_type in _EPHEMERAL_EVENTS:
+            return
+        try:
+            with self._db_lock:
+                self._conn.execute(
+                    "INSERT INTO office_events (timestamp, event_type, payload) VALUES (?, ?, ?)",
+                    (event.timestamp, event.event_type, payload_json),
+                )
+                self._conn.commit()
+        except Exception as err:
+            print(f"[EventBus] Failed to log {event.event_type}: {err}")
 
-        # 2. WebSocket fan-out
+    async def broadcast(self, event: OfficeEvent) -> None:
+        """Persist where it matters, then fan out to every connected client."""
+        # Redaction happens here so no path to a browser or a log can leak a
+        # key, regardless of which node produced the event.
+        payload_json = redact_secrets(json.dumps(event.model_dump()))
+
+        self._persist(event, payload_json)
+
         disconnected = []
-        for ws in self.active_websockets:
+        for websocket in list(self.active_websockets):
             try:
-                await ws.send_text(payload_json)
+                await websocket.send_text(payload_json)
             except Exception:
-                disconnected.append(ws)
+                disconnected.append(websocket)
 
-        for dead_ws in disconnected:
-            self.disconnect(dead_ws)
+        for dead in disconnected:
+            self.disconnect(dead)
 
 
-# Global singleton event bus
 _event_bus: Optional[OfficeEventBus] = None
 
 

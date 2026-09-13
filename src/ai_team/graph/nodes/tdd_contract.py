@@ -1,4 +1,4 @@
-"""TDD Contract node authoring the frozen test suite before implementation exists.
+"""TDD Contract node: author the test suite before any implementation exists.
 
 Once this node returns, `test_main.py` is immutable for the rest of the run.
 If no provider can produce a valid, non-vacuous suite, the run fails here. It
@@ -6,15 +6,19 @@ must never fall back to a stub that passes against anything, because the whole
 value of the pipeline rests on these assertions being real.
 """
 
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict
 
 from ai_team.config import get_config
 from ai_team.graph.contract_lock import freeze_contract, validate_test_contract
+from ai_team.graph.nodes._llm import authoring_candidates
 from ai_team.graph.state import TriadCouncilState
-from ai_team.utils import (
-    extract_python_code,
-    repair_truncated_python_code,
+from ai_team.providers.resilience import (
+    AllProvidersUnavailableError,
+    InvalidModelOutput,
+    RoleProvider,
+    call_with_office_presence,
 )
+from ai_team.utils import extract_python_code, repair_truncated_python_code
 
 _PROMPT = (
     "You are a Senior Software Quality Engineer authoring a strict Python unit "
@@ -42,35 +46,6 @@ def _criteria_text(rfc: Dict[str, Any]) -> str:
     return str(criteria)
 
 
-def _candidate_from_groq(prompt: str, config) -> Tuple[Optional[str], str]:
-    from langchain_groq import ChatGroq
-
-    llm = ChatGroq(
-        model_name=config.groq_researcher_model,
-        groq_api_key=config.groq_researcher_api_key,
-        temperature=0.2,
-        max_tokens=2500,
-        request_timeout=30,
-    )
-    response = llm.invoke(prompt)
-    return response.content, f"groq:{config.groq_researcher_model}"
-
-
-def _candidate_from_openrouter(prompt: str, config) -> Tuple[Optional[str], str]:
-    from langchain_openai import ChatOpenAI
-
-    llm = ChatOpenAI(
-        model=config.openrouter_model,
-        base_url="https://openrouter.ai/api/v1",
-        api_key=config.openrouter_api_key,
-        temperature=0.2,
-        max_tokens=2500,
-        request_timeout=30,
-    )
-    response = llm.invoke(prompt)
-    return response.content, f"openrouter:{config.openrouter_model}"
-
-
 def _interfaces_from_tests(task: str, test_source: str) -> str:
     """Record the import surface the tests demand, as the implementation contract."""
     imports = [
@@ -81,58 +56,64 @@ def _interfaces_from_tests(task: str, test_source: str) -> str:
     return f"'''Public interface contract for: {task}'''\n" + "\n".join(imports)
 
 
+def _validating(candidate: RoleProvider) -> RoleProvider:
+    """Wrap a candidate so an unusable suite moves on to the next provider."""
+
+    def call() -> str:
+        raw = candidate.call()
+        suite = repair_truncated_python_code(extract_python_code(raw or ""))
+        is_valid, reason = validate_test_contract(suite)
+        if not is_valid:
+            # Rejected, not repaired. A suite that cannot fail is worse than
+            # no suite, because it manufactures a passing run out of nothing.
+            raise InvalidModelOutput(f"unusable test contract ({reason})")
+        return suite
+
+    return RoleProvider(
+        label=candidate.label,
+        provider=candidate.provider,
+        model=candidate.model,
+        call=call,
+    )
+
+
 def tdd_contract_node(state: TriadCouncilState) -> Dict[str, Any]:
     """Author and freeze the test contract, or fail the run."""
     config = get_config()
     task = state.get("task_prompt", "")
-    prompt = _PROMPT.format(task=task, criteria=_criteria_text(state.get("manager_rfc") or {}))
+    prompt = _PROMPT.format(
+        task=task, criteria=_criteria_text(state.get("manager_rfc") or {})
+    )
 
-    attempts = []
-    if config.groq_researcher_api_key:
-        attempts.append(("Groq", _candidate_from_groq))
-    if config.openrouter_api_key:
-        attempts.append(("OpenRouter", _candidate_from_openrouter))
+    candidates = [_validating(item) for item in authoring_candidates(config, prompt)]
 
-    rejections = []
+    try:
+        suite, attribution = call_with_office_presence(
+            role="tdd_contract",
+            agent_id="developer",
+            candidates=candidates,
+            on_wait_status="Alex: provider is rate limiting the contract draft; waiting.",
+        )
+    except AllProvidersUnavailableError as err:
+        reason = "; ".join(err.notes)
+        print(f"  [TDD Engineer] FAILED to author a valid test contract: {reason}")
+        return {
+            "tdd_contract": {},
+            "tdd_status": "INVALID",
+            "tdd_locked": False,
+            "tdd_failure_reason": reason,
+            "qa_passed": False,
+            "qa_feedback": f"No valid TDD contract was produced: {reason}",
+        }
 
-    for label, call in attempts:
-        try:
-            print(f"  ... [TDD Engineer / {label}] Authoring frozen test contract...")
-            raw, attribution = call(prompt, config)
-        except Exception as err:
-            rejections.append(f"{label} unavailable: {err}")
-            continue
-
-        candidate = repair_truncated_python_code(extract_python_code(raw or ""))
-        is_valid, reason = validate_test_contract(candidate)
-        if is_valid:
-            print(f"  [TDD Engineer] Contract locked from {attribution}.")
-            delta = freeze_contract(
-                test_source=candidate,
-                interfaces_source=_interfaces_from_tests(task, candidate),
-            )
-            delta["tdd_status"] = "LOCKED"
-            delta["provider_attribution"] = {
-                **(state.get("provider_attribution") or {}),
-                "tdd_contract": attribution,
-            }
-            return delta
-
-        print(f"  [TDD Engineer] Rejected {label} contract: {reason}")
-        rejections.append(f"{label} rejected: {reason}")
-
-    if not attempts:
-        rejections.append("no provider credentials configured for the TDD role")
-
-    # No stub fallback. A suite that cannot fail is worse than no suite,
-    # because it manufactures a passing run out of nothing.
-    reason = "; ".join(rejections)
-    print(f"  [TDD Engineer] FAILED to author a valid test contract: {reason}")
-    return {
-        "tdd_contract": {},
-        "tdd_status": "INVALID",
-        "tdd_locked": False,
-        "tdd_failure_reason": reason,
-        "qa_passed": False,
-        "qa_feedback": f"No valid TDD contract was produced: {reason}",
+    print(f"  [TDD Engineer] Contract locked from {attribution}.")
+    delta = freeze_contract(
+        test_source=suite,
+        interfaces_source=_interfaces_from_tests(task, suite),
+    )
+    delta["tdd_status"] = "LOCKED"
+    delta["provider_attribution"] = {
+        **(state.get("provider_attribution") or {}),
+        "test_main.py": attribution,
     }
+    return delta
